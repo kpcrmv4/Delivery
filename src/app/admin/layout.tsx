@@ -1,13 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, ShoppingBag, Package, FolderOpen, Users,
   Settings, BarChart3, Tag, Menu, X, LogOut, Store
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth-store";
+import { createClient } from "@/lib/supabase/client";
+import { getOrders, getShopId } from "@/lib/supabase/queries";
 
 const sidebarItems = [
   { href: "/admin", icon: LayoutDashboard, label: "แดชบอร์ด" },
@@ -22,7 +25,40 @@ const sidebarItems = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const { profile, logout } = useAuthStore();
+
+  useEffect(() => {
+    // Load pending order count
+    const supabase = createClient();
+    getOrders(supabase, { shopId: getShopId(), status: ['pending', 'confirmed', 'preparing'] })
+      .then(({ data }) => setPendingCount(data.length));
+
+    // Realtime subscription for order count
+    const channel = supabase
+      .channel('admin-orders-count')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `shop_id=eq.${getShopId()}` },
+        () => {
+          getOrders(supabase, { shopId: getShopId(), status: ['pending', 'confirmed', 'preparing'] })
+            .then(({ data }) => setPendingCount(data.length));
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  const handleLogout = async () => {
+    await logout();
+    router.push('/admin/login');
+  };
+
+  // Skip layout for login page
+  if (pathname === '/admin/login') {
+    return <>{children}</>;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -79,9 +115,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               >
                 <item.icon className="w-5 h-5" />
                 {item.label}
-                {item.label === "จัดการออเดอร์" && (
+                {item.label === "จัดการออเดอร์" && pendingCount > 0 && (
                   <span className="ml-auto w-5 h-5 bg-accent text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                    3
+                    {pendingCount > 9 ? '9+' : pendingCount}
                   </span>
                 )}
               </Link>
@@ -91,13 +127,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {/* Bottom */}
         <div className="p-3 border-t">
-          <Link
-            href="/"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-600 hover:bg-gray-50"
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-gray-600 hover:bg-gray-50"
           >
             <LogOut className="w-5 h-5" />
             ออกจากระบบ
-          </Link>
+          </button>
         </div>
       </aside>
 
@@ -117,7 +153,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
               <span className="text-sm">👤</span>
             </div>
-            <span className="text-sm font-medium hidden sm:block">Admin</span>
+            <span className="text-sm font-medium hidden sm:block">{profile?.full_name || 'Admin'}</span>
           </div>
         </header>
 

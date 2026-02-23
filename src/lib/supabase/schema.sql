@@ -379,6 +379,25 @@ END;
 $$;
 
 -- ============================================================
+-- HELPER FUNCTIONS
+-- ============================================================
+
+-- Increment daily product sales (used by order API)
+CREATE OR REPLACE FUNCTION increment_daily_sales(
+    p_shop_id UUID,
+    p_product_id UUID,
+    p_sale_date DATE,
+    p_quantity INTEGER
+) RETURNS void AS $$
+BEGIN
+    INSERT INTO daily_product_sales (shop_id, product_id, sale_date, quantity_sold)
+    VALUES (p_shop_id, p_product_id, p_sale_date, p_quantity)
+    ON CONFLICT (shop_id, product_id, sale_date)
+    DO UPDATE SET quantity_sold = daily_product_sales.quantity_sold + p_quantity;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
 -- ROW LEVEL SECURITY (RLS)
 -- ============================================================
 
@@ -419,3 +438,88 @@ CREATE POLICY "Admin sees shop orders" ON orders FOR ALL USING (
 -- Profile access
 CREATE POLICY "Users see own profile" ON profiles FOR SELECT USING (id = auth.uid());
 CREATE POLICY "Users update own profile" ON profiles FOR UPDATE USING (id = auth.uid());
+CREATE POLICY "Admin sees shop profiles" ON profiles FOR SELECT USING (
+    shop_id IN (SELECT shop_id FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager'))
+);
+CREATE POLICY "Insert own profile" ON profiles FOR INSERT WITH CHECK (id = auth.uid());
+
+-- Banners
+ALTER TABLE banners ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public can read banners" ON banners FOR SELECT USING (is_active = true);
+CREATE POLICY "Admin manages banners" ON banners FOR ALL USING (
+    shop_id IN (SELECT shop_id FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager'))
+);
+
+-- Order items
+ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Read order items via order" ON order_items FOR SELECT USING (
+    order_id IN (SELECT id FROM orders WHERE customer_id = auth.uid() OR driver_id = auth.uid()
+        OR shop_id IN (SELECT shop_id FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager', 'staff')))
+);
+CREATE POLICY "Insert order items" ON order_items FOR INSERT WITH CHECK (true);
+
+-- Product options (public read)
+ALTER TABLE product_options ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public can read options" ON product_options FOR SELECT USING (true);
+CREATE POLICY "Admin manages options" ON product_options FOR ALL USING (
+    product_id IN (SELECT id FROM products WHERE shop_id IN (
+        SELECT shop_id FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager', 'staff')
+    ))
+);
+
+-- Product option choices (public read)
+ALTER TABLE product_option_choices ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public can read choices" ON product_option_choices FOR SELECT USING (true);
+CREATE POLICY "Admin manages choices" ON product_option_choices FOR ALL USING (
+    option_id IN (SELECT id FROM product_options WHERE product_id IN (
+        SELECT id FROM products WHERE shop_id IN (
+            SELECT shop_id FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager', 'staff')
+        )
+    ))
+);
+
+-- Customer addresses
+ALTER TABLE customer_addresses ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own addresses" ON customer_addresses FOR ALL USING (customer_id = auth.uid());
+
+-- Daily product sales
+ALTER TABLE daily_product_sales ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public can read sales" ON daily_product_sales FOR SELECT USING (true);
+CREATE POLICY "Insert sales" ON daily_product_sales FOR INSERT WITH CHECK (true);
+CREATE POLICY "Update sales" ON daily_product_sales FOR UPDATE USING (true);
+
+-- Order status logs
+ALTER TABLE order_status_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Read status logs" ON order_status_logs FOR SELECT USING (
+    order_id IN (SELECT id FROM orders WHERE customer_id = auth.uid() OR driver_id = auth.uid()
+        OR shop_id IN (SELECT shop_id FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager', 'staff')))
+);
+CREATE POLICY "Insert status logs" ON order_status_logs FOR INSERT WITH CHECK (true);
+
+-- Promotion codes
+ALTER TABLE promotion_codes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public can read promo codes" ON promotion_codes FOR SELECT USING (true);
+CREATE POLICY "Admin manages promo codes" ON promotion_codes FOR ALL USING (
+    promotion_id IN (SELECT id FROM promotions WHERE shop_id IN (
+        SELECT shop_id FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager')
+    ))
+);
+
+-- Promotion usages
+ALTER TABLE promotion_usages ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Insert promo usage" ON promotion_usages FOR INSERT WITH CHECK (true);
+CREATE POLICY "Read own promo usage" ON promotion_usages FOR SELECT USING (customer_id = auth.uid());
+
+-- Customer wallets
+ALTER TABLE customer_wallets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users see own wallet" ON customer_wallets FOR SELECT USING (customer_id = auth.uid());
+
+-- Referral codes
+ALTER TABLE referral_codes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public can read referral codes" ON referral_codes FOR SELECT USING (is_active = true);
+CREATE POLICY "Users manage own referral" ON referral_codes FOR ALL USING (referrer_id = auth.uid());
+
+-- Customers can create orders
+CREATE POLICY "Customers create orders" ON orders FOR INSERT WITH CHECK (true);
+-- Drivers can update assigned orders
+CREATE POLICY "Drivers update assigned orders" ON orders FOR UPDATE USING (driver_id = auth.uid());

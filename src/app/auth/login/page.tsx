@@ -1,21 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
-
+import { Mail, Lock, Eye, EyeOff, ArrowRight, User } from "lucide-react";
+import { useAuthStore } from "@/stores/auth-store";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login, signup, isAuthenticated, isLoading: authLoading } = useAuthStore();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSignup, setIsSignup] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleLogin = async (e: React.FormEvent) => {
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push("/");
+    }
+  }, [isAuthenticated, router]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
+    setError("");
+
+    if (isSignup) {
+      if (!fullName.trim()) {
+        setError("กรุณากรอกชื่อ");
+        setIsLoading(false);
+        return;
+      }
+      const result = await signup(email, password, fullName);
+      if (result.error) {
+        setError(result.error);
+        setIsLoading(false);
+        return;
+      }
+    } else {
+      const result = await login(email, password);
+      if (result.error) {
+        setError(result.error);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     setIsLoading(false);
     router.push("/");
   };
@@ -30,12 +63,35 @@ export default function LoginPage() {
             <span className="text-5xl">🍵</span>
           </div>
           <h1 className="text-2xl font-bold text-foreground">ร้านชาบ้านสวน</h1>
-          <p className="text-sm text-muted mt-1">ยินดีต้อนรับ! เข้าสู่ระบบเพื่อสั่งซื้อ</p>
+          <p className="text-sm text-muted mt-1">
+            {isSignup ? "สร้างบัญชีใหม่เพื่อเริ่มสั่งซื้อ" : "ยินดีต้อนรับ! เข้าสู่ระบบเพื่อสั่งซื้อ"}
+          </p>
         </div>
 
         {/* Form Card */}
         <div className="bg-white rounded-3xl p-6 shadow-card">
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Full Name (signup only) */}
+            {isSignup && (
+              <div>
+                <label htmlFor="fullName" className="text-sm font-medium text-foreground mb-1.5 block">
+                  ชื่อ-นามสกุล
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    id="fullName"
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="ชื่อ นามสกุล"
+                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+                    autoComplete="name"
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Email */}
             <div>
               <label htmlFor="email" className="text-sm font-medium text-foreground mb-1.5 block">
@@ -70,7 +126,7 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="รหัสผ่านของคุณ"
                   className="w-full pl-11 pr-11 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
-                  autoComplete="current-password"
+                  autoComplete={isSignup ? "new-password" : "current-password"}
                 />
                 <button
                   type="button"
@@ -83,14 +139,23 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Forgot Password */}
-            <div className="text-right">
-              <button type="button" className="text-xs text-primary font-medium">
-                ลืมรหัสผ่าน?
-              </button>
-            </div>
+            {/* Error Message */}
+            {error && (
+              <div className="text-sm text-red-500 bg-red-50 px-3 py-2 rounded-xl">
+                {error}
+              </div>
+            )}
 
-            {/* Login Button */}
+            {/* Forgot Password (login only) */}
+            {!isSignup && (
+              <div className="text-right">
+                <button type="button" className="text-xs text-primary font-medium">
+                  ลืมรหัสผ่าน?
+                </button>
+              </div>
+            )}
+
+            {/* Login/Signup Button */}
             <button
               type="submit"
               disabled={isLoading}
@@ -100,7 +165,7 @@ export default function LoginPage() {
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
                 <>
-                  เข้าสู่ระบบ
+                  {isSignup ? "สมัครสมาชิก" : "เข้าสู่ระบบ"}
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -115,7 +180,10 @@ export default function LoginPage() {
           </div>
 
           {/* LINE Login */}
-          <button className="w-full bg-[#06C755] hover:bg-[#05b34d] text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors">
+          <button
+            onClick={() => alert("LINE Login coming soon")}
+            className="w-full bg-[#06C755] hover:bg-[#05b34d] text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+          >
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19.365 9.863c.349 0 .63.285.63.631 0 .345-.281.63-.63.63H17.61v1.125h1.755c.349 0 .63.283.63.63 0 .344-.281.629-.63.629h-2.386c-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63h2.386c.346 0 .627.285.627.63 0 .349-.281.63-.63.63H17.61v1.125h1.755zm-3.855 3.016c0 .27-.174.51-.432.596-.064.021-.133.031-.199.031-.211 0-.391-.09-.51-.25l-2.443-3.317v2.94c0 .344-.279.629-.631.629-.346 0-.626-.285-.626-.629V8.108c0-.27.173-.51.43-.595.06-.023.136-.033.194-.033.195 0 .375.104.495.254l2.462 3.33V8.108c0-.345.282-.63.63-.63.345 0 .63.285.63.63v4.771zm-5.741 0c0 .344-.282.629-.631.629-.345 0-.627-.285-.627-.629V8.108c0-.345.282-.63.63-.63.346 0 .628.285.628.63v4.771zm-2.466.629H4.917c-.345 0-.63-.285-.63-.629V8.108c0-.345.285-.63.63-.63.348 0 .63.285.63.63v4.141h1.756c.348 0 .629.283.629.63 0 .344-.282.629-.629.629M24 10.314C24 4.943 18.615.572 12 .572S0 4.943 0 10.314c0 4.811 4.27 8.842 10.035 9.608.391.082.923.258 1.058.59.12.301.079.766.038 1.08l-.164 1.02c-.045.301-.24 1.186 1.049.645 1.291-.539 6.916-4.078 9.436-6.975C23.176 14.393 24 12.458 24 10.314" />
             </svg>
@@ -131,10 +199,18 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {/* Register */}
+        {/* Register / Login Toggle */}
         <p className="text-center text-sm text-muted mt-6">
-          ยังไม่มีบัญชี?{" "}
-          <button className="text-primary font-semibold">สมัครสมาชิก</button>
+          {isSignup ? "มีบัญชีอยู่แล้ว?" : "ยังไม่มีบัญชี?"}{" "}
+          <button
+            onClick={() => {
+              setIsSignup(!isSignup);
+              setError("");
+            }}
+            className="text-primary font-semibold"
+          >
+            {isSignup ? "เข้าสู่ระบบ" : "สมัครสมาชิก"}
+          </button>
         </p>
       </div>
     </div>

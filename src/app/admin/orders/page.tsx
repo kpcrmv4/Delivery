@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   LayoutGrid,
   List,
   Clock,
   ChevronRight,
   Package,
+  Loader2,
 } from "lucide-react";
 import {
   cn,
@@ -15,136 +16,32 @@ import {
   getOrderStatusText,
   getOrderStatusColor,
 } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import {
+  getOrders,
+  getShopId,
+  updateOrderStatus,
+  subscribeToOrders,
+} from "@/lib/supabase/queries";
+import type { Order } from "@/types";
 
-type OrderStatus = "pending" | "preparing" | "ready" | "delivering";
+type BoardStatus = "pending" | "preparing" | "ready" | "delivering";
 
-interface Order {
-  id: string;
-  order_number: string;
-  customer: string;
-  items: { name: string; qty: number }[];
-  total: number;
-  status: OrderStatus;
-  payment_status: "paid" | "unpaid";
-  created_at: string;
-}
-
-const mockOrders: Order[] = [
-  {
-    id: "1",
-    order_number: "ORD-20260223-001",
-    customer: "สมชาย ใจดี",
-    items: [
-      { name: "ชาเขียวมัทฉะ", qty: 2 },
-      { name: "เค้กส้ม", qty: 1 },
-    ],
-    total: 450,
-    status: "pending",
-    payment_status: "paid",
-    created_at: "2026-02-23T09:15:00",
-  },
-  {
-    id: "2",
-    order_number: "ORD-20260223-002",
-    customer: "วิภา สุขใจ",
-    items: [{ name: "ชานมไข่มุก", qty: 1 }],
-    total: 120,
-    status: "pending",
-    payment_status: "unpaid",
-    created_at: "2026-02-23T09:30:00",
-  },
-  {
-    id: "3",
-    order_number: "ORD-20260223-003",
-    customer: "ธนพล รักษ์ดี",
-    items: [
-      { name: "ชาไทย", qty: 3 },
-      { name: "วาฟเฟิล", qty: 2 },
-    ],
-    total: 890,
-    status: "preparing",
-    payment_status: "paid",
-    created_at: "2026-02-23T08:45:00",
-  },
-  {
-    id: "4",
-    order_number: "ORD-20260223-004",
-    customer: "นภา แสนสุข",
-    items: [
-      { name: "ชาเย็น", qty: 1 },
-      { name: "ขนมปัง", qty: 1 },
-    ],
-    total: 260,
-    status: "preparing",
-    payment_status: "paid",
-    created_at: "2026-02-23T08:50:00",
-  },
-  {
-    id: "5",
-    order_number: "ORD-20260223-005",
-    customer: "พิชัย มั่นคง",
-    items: [
-      { name: "ชาอู่หลง", qty: 2 },
-      { name: "เค้กชาเขียว", qty: 2 },
-    ],
-    total: 720,
-    status: "ready",
-    payment_status: "paid",
-    created_at: "2026-02-23T08:20:00",
-  },
-  {
-    id: "6",
-    order_number: "ORD-20260223-006",
-    customer: "อรุณี วงศ์สกุล",
-    items: [{ name: "ชาดำเย็น", qty: 1 }],
-    total: 80,
-    status: "ready",
-    payment_status: "paid",
-    created_at: "2026-02-23T08:10:00",
-  },
-  {
-    id: "7",
-    order_number: "ORD-20260223-007",
-    customer: "กิตติ เจริญผล",
-    items: [
-      { name: "ชาเขียวนม", qty: 1 },
-      { name: "โดนัท", qty: 3 },
-    ],
-    total: 340,
-    status: "delivering",
-    payment_status: "paid",
-    created_at: "2026-02-23T07:55:00",
-  },
-  {
-    id: "8",
-    order_number: "ORD-20260223-008",
-    customer: "ปรียา จันทร์ฉาย",
-    items: [
-      { name: "ชามะลิ", qty: 2 },
-      { name: "เค้กช็อกโกแลต", qty: 1 },
-    ],
-    total: 520,
-    status: "delivering",
-    payment_status: "paid",
-    created_at: "2026-02-23T07:40:00",
-  },
-];
-
-const columns: { status: OrderStatus; label: string; headerColor: string }[] = [
+const columns: { status: BoardStatus; label: string; headerColor: string }[] = [
   { status: "pending", label: "รอยืนยัน", headerColor: "bg-yellow-400" },
   { status: "preparing", label: "กำลังเตรียม", headerColor: "bg-orange-400" },
   { status: "ready", label: "พร้อมส่ง", headerColor: "bg-purple-400" },
   { status: "delivering", label: "กำลังจัดส่ง", headerColor: "bg-cyan-400" },
 ];
 
-const nextStatus: Record<OrderStatus, OrderStatus | null> = {
+const nextStatus: Record<BoardStatus, BoardStatus | null> = {
   pending: "preparing",
   preparing: "ready",
   ready: "delivering",
   delivering: null,
 };
 
-const nextStatusLabel: Record<OrderStatus, string> = {
+const nextStatusLabel: Record<BoardStatus, string> = {
   pending: "เริ่มเตรียม",
   preparing: "พร้อมส่ง",
   ready: "ส่งเลย",
@@ -152,10 +49,11 @@ const nextStatusLabel: Record<OrderStatus, string> = {
 };
 
 function getTimeAgo(dateStr: string): string {
-  const now = new Date("2026-02-23T10:00:00");
+  const now = new Date();
   const date = new Date(dateStr);
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "เมื่อสักครู่";
   if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
   const diffHr = Math.floor(diffMin / 60);
   return `${diffHr} ชม.ที่แล้ว`;
@@ -163,22 +61,60 @@ function getTimeAgo(dateStr: string): string {
 
 export default function AdminOrdersPage() {
   const [view, setView] = useState<"board" | "list">("board");
-  const [orders, setOrders] = useState<Order[]>(mockOrders);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleStatusChange = (orderId: string) => {
-    setOrders((prev) =>
-      prev.map((order) => {
-        if (order.id === orderId) {
-          const next = nextStatus[order.status];
-          if (next) return { ...order, status: next };
-        }
-        return order;
-      })
-    );
+  const shopId = getShopId();
+
+  const fetchOrders = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await getOrders(supabase, { shopId });
+    if (data) setOrders(data);
+    setLoading(false);
+  }, [shopId]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
+
+  // Realtime subscription
+  useEffect(() => {
+    if (!shopId) return;
+    const supabase = createClient();
+    const channel = subscribeToOrders(supabase, shopId, () => {
+      fetchOrders();
+    });
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [shopId, fetchOrders]);
+
+  const handleStatusChange = async (orderId: string, currentStatus: string) => {
+    const next = nextStatus[currentStatus as BoardStatus];
+    if (!next) return;
+
+    const supabase = createClient();
+    const { error } = await updateOrderStatus(supabase, orderId, next);
+    if (!error) {
+      // Optimistic update
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === orderId ? { ...order, status: next } : order
+        )
+      );
+    }
   };
 
-  const getOrdersByStatus = (status: OrderStatus) =>
+  const getOrdersByStatus = (status: BoardStatus) =>
     orders.filter((o) => o.status === status);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -249,7 +185,7 @@ export default function AdminOrdersPage() {
                             {order.order_number}
                           </p>
                           <p className="text-xs text-muted mt-0.5">
-                            {order.customer}
+                            {order.customer_name}
                           </p>
                         </div>
                         <span className="text-[10px] text-gray-400 flex items-center gap-1 whitespace-nowrap">
@@ -259,11 +195,11 @@ export default function AdminOrdersPage() {
                       </div>
 
                       <div className="text-xs text-gray-500 space-y-0.5">
-                        {order.items.map((item, i) => (
+                        {(order.items || []).map((item, i) => (
                           <div key={i} className="flex items-center gap-1">
                             <Package className="w-3 h-3 text-gray-400" />
                             <span>
-                              {item.name} x{item.qty}
+                              {item.product_name} x{item.quantity}
                             </span>
                           </div>
                         ))}
@@ -273,12 +209,12 @@ export default function AdminOrdersPage() {
                         <span className="text-sm font-bold text-foreground">
                           {formatPrice(order.total)}
                         </span>
-                        {nextStatus[order.status] && (
+                        {nextStatus[order.status as BoardStatus] && (
                           <button
-                            onClick={() => handleStatusChange(order.id)}
+                            onClick={() => handleStatusChange(order.id, order.status)}
                             className="flex items-center gap-1 px-3 py-1.5 bg-primary/10 text-primary rounded-lg text-xs font-medium hover:bg-primary/20 transition-colors"
                           >
-                            {nextStatusLabel[order.status]}
+                            {nextStatusLabel[order.status as BoardStatus]}
                             <ChevronRight className="w-3 h-3" />
                           </button>
                         )}
@@ -325,10 +261,10 @@ export default function AdminOrdersPage() {
                       {order.order_number}
                     </td>
                     <td className="px-5 py-3 text-gray-700">
-                      {order.customer}
+                      {order.customer_name}
                     </td>
                     <td className="px-5 py-3 text-gray-600">
-                      {order.items.map((i) => `${i.name} x${i.qty}`).join(", ")}
+                      {(order.items || []).map((i) => `${i.product_name} x${i.quantity}`).join(", ")}
                     </td>
                     <td className="px-5 py-3 text-right font-medium text-foreground">
                       {formatPrice(order.total)}
@@ -383,9 +319,9 @@ export default function AdminOrdersPage() {
                     {getOrderStatusText(order.status)}
                   </span>
                 </div>
-                <p className="text-xs text-gray-500">{order.customer}</p>
+                <p className="text-xs text-gray-500">{order.customer_name}</p>
                 <p className="text-xs text-gray-400">
-                  {order.items.map((i) => `${i.name} x${i.qty}`).join(", ")}
+                  {(order.items || []).map((i) => `${i.product_name} x${i.quantity}`).join(", ")}
                 </p>
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-bold text-foreground">

@@ -252,19 +252,32 @@ export interface Banner {
 // ============ Profile ============
 export interface Profile {
   id: string;
+  shop_id?: string;
   role: "owner" | "manager" | "staff" | "driver" | "customer";
   full_name: string;
   phone: string;
   avatar_url: string;
   email: string;
+  line_user_id?: string;
 }
 
 export interface CustomerAddress {
   id: string;
+  customer_id?: string;
   label: string;
   address_text: string;
   latitude: number;
   longitude: number;
   note: string;
   is_default: boolean;
+}
+
+// ============ Banner (extended for DB) ============
+export interface BannerFull extends Banner {
+  shop_id: string;
+  title: string;
+  subtitle: string;
+  start_date: string | null;
+  end_date: string | null;
+  created_at: string;
 }

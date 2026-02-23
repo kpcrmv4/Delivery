@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, Store } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -10,13 +11,55 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    setIsLoading(false);
-    router.push("/admin");
+    setError(null);
+
+    try {
+      const supabase = createClient();
+
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+      if (authError) {
+        setError("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+        setIsLoading(false);
+        return;
+      }
+
+      // Check profile role
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authData.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        setError("ไม่พบข้อมูลผู้ใช้ในระบบ");
+        await supabase.auth.signOut();
+        setIsLoading(false);
+        return;
+      }
+
+      const adminRoles = ["owner", "manager", "staff"];
+      if (!adminRoles.includes(profile.role)) {
+        setError("คุณไม่มีสิทธิ์เข้าใช้งานระบบจัดการ");
+        await supabase.auth.signOut();
+        setIsLoading(false);
+        return;
+      }
+
+      router.push("/admin");
+    } catch {
+      setError("เกิดข้อผิดพลาด กรุณาลองใหม่");
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -32,6 +75,11 @@ export default function AdminLoginPage() {
 
         <div className="bg-white rounded-2xl p-6 shadow-card">
           <form onSubmit={handleLogin} className="space-y-4">
+            {error && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm text-center">
+                {error}
+              </div>
+            )}
             <div>
               <label htmlFor="admin-email" className="text-sm font-medium mb-1.5 block">อีเมล</label>
               <div className="relative">

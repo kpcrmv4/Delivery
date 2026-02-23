@@ -1,107 +1,124 @@
 "use client";
 
-
+import { useState, useEffect, useCallback } from "react";
 import {
   DollarSign,
   ShoppingBag,
-  Users,
   TrendingUp,
   Clock,
   ArrowUpRight,
   Package,
   BarChart3,
+  Loader2,
 } from "lucide-react";
 import { cn, formatPrice, getOrderStatusText, getOrderStatusColor } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { getDashboardStats, getOrders, getShopId, subscribeToOrders } from "@/lib/supabase/queries";
+import type { Order } from "@/types";
 
-const statsCards = [
-  {
-    label: "รายได้วันนี้",
-    value: "฿12,450",
-    change: "+12%",
-    changeType: "up" as const,
-    icon: DollarSign,
-    iconBg: "bg-emerald-100",
-    iconColor: "text-emerald-600",
-  },
-  {
-    label: "ออเดอร์วันนี้",
-    value: "48",
-    change: "+8%",
-    changeType: "up" as const,
-    icon: ShoppingBag,
-    iconBg: "bg-blue-100",
-    iconColor: "text-blue-600",
-  },
-  {
-    label: "ลูกค้าใหม่",
-    value: "5",
-    change: null,
-    changeType: null,
-    icon: Users,
-    iconBg: "bg-purple-100",
-    iconColor: "text-purple-600",
-  },
-  {
-    label: "อัตราสำเร็จ",
-    value: "96%",
-    change: null,
-    changeType: null,
-    icon: TrendingUp,
-    iconBg: "bg-orange-100",
-    iconColor: "text-orange-600",
-  },
-];
-
-const recentOrders = [
-  {
-    order_number: "ORD-20260223-001",
-    customer: "สมชาย ใจดี",
-    items: 3,
-    total: 450,
-    status: "delivering",
-    time: "10 นาทีที่แล้ว",
-  },
-  {
-    order_number: "ORD-20260223-002",
-    customer: "วิภา สุขใจ",
-    items: 1,
-    total: 120,
-    status: "preparing",
-    time: "15 นาทีที่แล้ว",
-  },
-  {
-    order_number: "ORD-20260223-003",
-    customer: "ธนพล รักษ์ดี",
-    items: 5,
-    total: 890,
-    status: "pending",
-    time: "22 นาทีที่แล้ว",
-  },
-  {
-    order_number: "ORD-20260223-004",
-    customer: "นภา แสนสุข",
-    items: 2,
-    total: 260,
-    status: "delivered",
-    time: "45 นาทีที่แล้ว",
-  },
-  {
-    order_number: "ORD-20260223-005",
-    customer: "พิชัย มั่นคง",
-    items: 4,
-    total: 720,
-    status: "ready",
-    time: "30 นาทีที่แล้ว",
-  },
-];
+function getTimeAgo(dateStr: string): string {
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "เมื่อสักครู่";
+  if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
+  const diffHr = Math.floor(diffMin / 60);
+  return `${diffHr} ชม.ที่แล้ว`;
+}
 
 export default function AdminDashboardPage() {
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    ordersToday: 0,
+    revenueToday: 0,
+    pendingOrders: 0,
+  });
+  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+
+  const shopId = getShopId();
+
+  const fetchData = useCallback(async () => {
+    const supabase = createClient();
+    const [statsResult, ordersResult] = await Promise.all([
+      getDashboardStats(supabase, shopId),
+      getOrders(supabase, { shopId, limit: 5 }),
+    ]);
+
+    setStats({
+      ordersToday: statsResult.ordersToday,
+      revenueToday: statsResult.revenueToday,
+      pendingOrders: statsResult.pendingOrders,
+    });
+
+    if (ordersResult.data) {
+      setRecentOrders(ordersResult.data);
+    }
+
+    setLoading(false);
+  }, [shopId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Realtime subscription
+  useEffect(() => {
+    if (!shopId) return;
+    const supabase = createClient();
+    const channel = subscribeToOrders(supabase, shopId, () => {
+      fetchData();
+    });
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [shopId, fetchData]);
+
   const today = new Date().toLocaleDateString("th-TH", {
     weekday: "long",
     year: "numeric",
     month: "long",
     day: "numeric",
   });
+
+  const statsCards = [
+    {
+      label: "รายได้วันนี้",
+      value: formatPrice(stats.revenueToday),
+      icon: DollarSign,
+      iconBg: "bg-emerald-100",
+      iconColor: "text-emerald-600",
+    },
+    {
+      label: "ออเดอร์วันนี้",
+      value: String(stats.ordersToday),
+      icon: ShoppingBag,
+      iconBg: "bg-blue-100",
+      iconColor: "text-blue-600",
+    },
+    {
+      label: "รอดำเนินการ",
+      value: String(stats.pendingOrders),
+      icon: Clock,
+      iconBg: "bg-purple-100",
+      iconColor: "text-purple-600",
+    },
+    {
+      label: "อัตราสำเร็จ",
+      value: stats.ordersToday > 0 ? `${Math.round(((stats.ordersToday - stats.pendingOrders) / stats.ordersToday) * 100)}%` : "0%",
+      icon: TrendingUp,
+      iconBg: "bg-orange-100",
+      iconColor: "text-orange-600",
+    },
+  ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -129,12 +146,6 @@ export default function AdminDashboardPage() {
               >
                 <card.icon className={cn("w-5 h-5", card.iconColor)} />
               </div>
-              {card.change && (
-                <span className="flex items-center gap-0.5 text-xs font-medium text-emerald-600">
-                  <ArrowUpRight className="w-3 h-3" />
-                  {card.change}
-                </span>
-              )}
             </div>
             <div>
               <p className="text-xl font-bold text-foreground">{card.value}</p>
@@ -158,90 +169,96 @@ export default function AdminDashboardPage() {
           </a>
         </div>
 
-        {/* Desktop Table */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-muted text-xs">
-                <th className="text-left px-5 py-3 font-medium">เลขออเดอร์</th>
-                <th className="text-left px-5 py-3 font-medium">ลูกค้า</th>
-                <th className="text-center px-5 py-3 font-medium">รายการ</th>
-                <th className="text-right px-5 py-3 font-medium">ยอดรวม</th>
-                <th className="text-center px-5 py-3 font-medium">สถานะ</th>
-                <th className="text-right px-5 py-3 font-medium">เวลา</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
+        {recentOrders.length === 0 ? (
+          <div className="py-12 text-center text-muted text-sm">ยังไม่มีออเดอร์</div>
+        ) : (
+          <>
+            {/* Desktop Table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-muted text-xs">
+                    <th className="text-left px-5 py-3 font-medium">เลขออเดอร์</th>
+                    <th className="text-left px-5 py-3 font-medium">ลูกค้า</th>
+                    <th className="text-center px-5 py-3 font-medium">รายการ</th>
+                    <th className="text-right px-5 py-3 font-medium">ยอดรวม</th>
+                    <th className="text-center px-5 py-3 font-medium">สถานะ</th>
+                    <th className="text-right px-5 py-3 font-medium">เวลา</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {recentOrders.map((order) => (
+                    <tr
+                      key={order.id}
+                      className="hover:bg-gray-50/50 transition-colors"
+                    >
+                      <td className="px-5 py-3 font-medium text-foreground">
+                        {order.order_number}
+                      </td>
+                      <td className="px-5 py-3 text-gray-700">{order.customer_name}</td>
+                      <td className="px-5 py-3 text-center text-gray-600">
+                        {order.items?.length || 0} รายการ
+                      </td>
+                      <td className="px-5 py-3 text-right font-medium text-foreground">
+                        {formatPrice(order.total)}
+                      </td>
+                      <td className="px-5 py-3 text-center">
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
+                            getOrderStatusColor(order.status)
+                          )}
+                        >
+                          {getOrderStatusText(order.status)}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-right text-gray-500">
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {getTimeAgo(order.created_at)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards */}
+            <div className="md:hidden divide-y divide-gray-50">
               {recentOrders.map((order) => (
-                <tr
-                  key={order.order_number}
-                  className="hover:bg-gray-50/50 transition-colors"
-                >
-                  <td className="px-5 py-3 font-medium text-foreground">
-                    {order.order_number}
-                  </td>
-                  <td className="px-5 py-3 text-gray-700">{order.customer}</td>
-                  <td className="px-5 py-3 text-center text-gray-600">
-                    {order.items} รายการ
-                  </td>
-                  <td className="px-5 py-3 text-right font-medium text-foreground">
-                    {formatPrice(order.total)}
-                  </td>
-                  <td className="px-5 py-3 text-center">
+                <div key={order.id} className="px-5 py-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-foreground">
+                      {order.order_number}
+                    </span>
                     <span
                       className={cn(
-                        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
+                        "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium",
                         getOrderStatusColor(order.status)
                       )}
                     >
                       {getOrderStatusText(order.status)}
                     </span>
-                  </td>
-                  <td className="px-5 py-3 text-right text-gray-500">
-                    <span className="inline-flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {order.time}
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>{order.customer_name}</span>
+                    <span>{order.items?.length || 0} รายการ</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-foreground">
+                      {formatPrice(order.total)}
                     </span>
-                  </td>
-                </tr>
+                    <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {getTimeAgo(order.created_at)}
+                    </span>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile Cards */}
-        <div className="md:hidden divide-y divide-gray-50">
-          {recentOrders.map((order) => (
-            <div key={order.order_number} className="px-5 py-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-foreground">
-                  {order.order_number}
-                </span>
-                <span
-                  className={cn(
-                    "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium",
-                    getOrderStatusColor(order.status)
-                  )}
-                >
-                  {getOrderStatusText(order.status)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-gray-500">
-                <span>{order.customer}</span>
-                <span>{order.items} รายการ</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-foreground">
-                  {formatPrice(order.total)}
-                </span>
-                <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {order.time}
-                </span>
-              </div>
             </div>
-          ))}
-        </div>
+          </>
+        )}
       </div>
 
       {/* Quick Actions */}
