@@ -13,6 +13,8 @@ export default function CartPage() {
   const [promoCode, setPromoCode] = useState("");
   const [promoApplied, setPromoApplied] = useState(false);
   const [promoDiscount, setPromoDiscount] = useState(0);
+  const [promoError, setPromoError] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
 
   const subtotal = getSubtotal();
   const deliveryFee = subtotal >= 150 ? 0 : 30;
@@ -21,13 +23,35 @@ export default function CartPage() {
   const maxItemsPerOrder = 20;
   const totalItems = items.reduce((sum, i) => sum + i.quantity, 0);
 
-  const handleApplyPromo = () => {
-    if (promoCode.toUpperCase() === "NEWBIE50") {
-      setPromoDiscount(Math.min(subtotal * 0.5, 100));
-      setPromoApplied(true);
-    } else if (promoCode.toUpperCase() === "FREEDEL") {
-      setPromoDiscount(deliveryFee);
-      setPromoApplied(true);
+  const handleApplyPromo = async () => {
+    if (!promoCode.trim()) return;
+    setPromoLoading(true);
+    setPromoError("");
+    setPromoApplied(false);
+    setPromoDiscount(0);
+
+    try {
+      const res = await fetch("/api/promotions/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: promoCode, subtotal }),
+      });
+
+      const data = await res.json();
+
+      if (data.valid) {
+        setPromoDiscount(data.discount || 0);
+        setPromoApplied(true);
+        setPromoError("");
+      } else {
+        setPromoError(data.error || "โค้ดไม่ถูกต้อง");
+        setPromoApplied(false);
+        setPromoDiscount(0);
+      }
+    } catch {
+      setPromoError("เกิดข้อผิดพลาด กรุณาลองอีกครั้ง");
+    } finally {
+      setPromoLoading(false);
     }
   };
 
@@ -148,14 +172,24 @@ export default function CartPage() {
             />
             <button
               onClick={handleApplyPromo}
-              className="px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-primary-dark transition-colors"
+              disabled={promoLoading}
+              className="px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-primary-dark transition-colors disabled:opacity-70"
             >
-              ใช้โค้ด
+              {promoLoading ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                "ใช้โค้ด"
+              )}
             </button>
           </div>
           {promoApplied && (
             <p className="text-xs text-green-600 mt-2">
-              ✅ ใช้โค้ดสำเร็จ! ลด {formatPrice(promoDiscount)}
+              ใช้โค้ดสำเร็จ! ลด {formatPrice(promoDiscount)}
+            </p>
+          )}
+          {promoError && (
+            <p className="text-xs text-red-500 mt-2">
+              {promoError}
             </p>
           )}
         </div>

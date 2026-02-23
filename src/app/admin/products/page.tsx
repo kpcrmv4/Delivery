@@ -1,104 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { Search, Plus, Edit, Trash2, Package, Filter } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Search, Plus, Edit, Trash2, Package, Filter, Loader2 } from "lucide-react";
 import { cn, formatPrice } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { getProducts, getShopId, deleteProduct as deleteProductQuery } from "@/lib/supabase/queries";
+import type { Product } from "@/types";
 
 type ProductStatus = "available" | "sold_out" | "hidden";
-
-interface Product {
-  id: string;
-  name: string;
-  emoji: string;
-  category: string;
-  price: number;
-  status: ProductStatus;
-  dailyLimit: number | null;
-  dailySold: number;
-}
-
-const mockProducts: Product[] = [
-  {
-    id: "1",
-    name: "ชาเขียวมัทฉะเย็น",
-    emoji: "🍵",
-    category: "เครื่องดื่มเย็น",
-    price: 55,
-    status: "available",
-    dailyLimit: 50,
-    dailySold: 45,
-  },
-  {
-    id: "2",
-    name: "ชานมไข่มุก",
-    emoji: "🧋",
-    category: "ชานม",
-    price: 65,
-    status: "available",
-    dailyLimit: null,
-    dailySold: 32,
-  },
-  {
-    id: "3",
-    name: "กาแฟลาเต้เย็น",
-    emoji: "☕",
-    category: "กาแฟ",
-    price: 60,
-    status: "available",
-    dailyLimit: 80,
-    dailySold: 28,
-  },
-  {
-    id: "4",
-    name: "โกโก้ปั่น",
-    emoji: "🍫",
-    category: "เครื่องดื่มเย็น",
-    price: 70,
-    status: "sold_out",
-    dailyLimit: 30,
-    dailySold: 30,
-  },
-  {
-    id: "5",
-    name: "ชาไทยเย็น",
-    emoji: "🥤",
-    category: "ชานม",
-    price: 45,
-    status: "available",
-    dailyLimit: null,
-    dailySold: 67,
-  },
-  {
-    id: "6",
-    name: "นมสดปั่น",
-    emoji: "🥛",
-    category: "เครื่องดื่มเย็น",
-    price: 50,
-    status: "hidden",
-    dailyLimit: null,
-    dailySold: 0,
-  },
-  {
-    id: "7",
-    name: "อเมริกาโน่ร้อน",
-    emoji: "☕",
-    category: "เครื่องดื่มร้อน",
-    price: 50,
-    status: "available",
-    dailyLimit: 100,
-    dailySold: 51,
-  },
-  {
-    id: "8",
-    name: "ชามะนาวน้ำผึ้ง",
-    emoji: "🍋",
-    category: "เครื่องดื่มร้อน",
-    price: 45,
-    status: "sold_out",
-    dailyLimit: 40,
-    dailySold: 40,
-  },
-];
 
 const filterTabs: { key: string; label: string }[] = [
   { key: "all", label: "ทั้งหมด" },
@@ -129,9 +38,23 @@ const statusConfig: Record<
 };
 
 export default function AdminProductsPage() {
-  const [products, setProducts] = useState<Product[]>(mockProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+
+  const shopId = getShopId();
+
+  const fetchProducts = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await getProducts(supabase, shopId);
+    if (data) setProducts(data);
+    setLoading(false);
+  }, [shopId]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
 
   const filteredProducts = products.filter((product) => {
     const matchesSearch = product.name
@@ -149,23 +72,42 @@ export default function AdminProductsPage() {
     hidden: products.filter((p) => p.status === "hidden").length,
   };
 
-  function toggleStatus(id: string) {
-    setProducts((prev) =>
-      prev.map((p) => {
-        if (p.id !== id) return p;
-        const next: ProductStatus =
-          p.status === "available"
-            ? "hidden"
-            : p.status === "hidden"
-              ? "available"
-              : p.status;
-        return { ...p, status: next };
-      })
-    );
+  async function toggleStatus(id: string) {
+    const product = products.find((p) => p.id === id);
+    if (!product || product.status === "sold_out") return;
+
+    const newStatus: ProductStatus =
+      product.status === "available" ? "hidden" : "available";
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("products")
+      .update({ status: newStatus })
+      .eq("id", id);
+
+    if (!error) {
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === id ? { ...p, status: newStatus } : p
+        )
+      );
+    }
   }
 
-  function deleteProduct(id: string) {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
+  async function handleDeleteProduct(id: string) {
+    const supabase = createClient();
+    const { error } = await deleteProductQuery(supabase, id);
+    if (!error) {
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
   }
 
   return (
@@ -243,8 +185,8 @@ export default function AdminProductsPage() {
           {filteredProducts.map((product) => {
             const status = statusConfig[product.status];
             const limitReached =
-              product.dailyLimit !== null &&
-              product.dailySold >= product.dailyLimit;
+              product.daily_limit !== null &&
+              product.daily_sold >= product.daily_limit;
 
             return (
               <div
@@ -253,7 +195,15 @@ export default function AdminProductsPage() {
               >
                 {/* Image / Emoji area */}
                 <div className="relative bg-mint-100 h-36 flex items-center justify-center">
-                  <span className="text-5xl">{product.emoji}</span>
+                  {product.image_url ? (
+                    <img
+                      src={product.image_url}
+                      alt={product.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-5xl">{"📦"}</span>
+                  )}
                   {/* Status badge */}
                   <div
                     className={cn(
@@ -275,7 +225,7 @@ export default function AdminProductsPage() {
                       {product.name}
                     </h3>
                     <p className="text-xs text-muted mt-0.5">
-                      {product.category}
+                      {((product as unknown as Record<string, unknown>).category as Record<string, string> | undefined)?.name || ""}
                     </p>
                   </div>
 
@@ -283,7 +233,7 @@ export default function AdminProductsPage() {
                     <span className="text-lg font-bold text-primary">
                       {formatPrice(product.price)}
                     </span>
-                    {product.dailyLimit !== null && (
+                    {product.daily_limit !== null && (
                       <span
                         className={cn(
                           "text-xs font-medium px-2 py-0.5 rounded-full",
@@ -292,7 +242,7 @@ export default function AdminProductsPage() {
                             : "bg-mint-50 text-mint-600"
                         )}
                       >
-                        ขายแล้ว {product.dailySold}/{product.dailyLimit}
+                        ขายแล้ว {product.daily_sold}/{product.daily_limit}
                       </span>
                     )}
                   </div>
@@ -338,7 +288,7 @@ export default function AdminProductsPage() {
                         <Edit className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => deleteProduct(product.id)}
+                        onClick={() => handleDeleteProduct(product.id)}
                         className="p-2 text-muted hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                         aria-label="ลบ"
                       >

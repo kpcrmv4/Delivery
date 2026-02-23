@@ -1,31 +1,66 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowLeft, Phone, Navigation, MapPin, Camera, Check, Package } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { useRouter, useParams } from "next/navigation";
+import { ArrowLeft, Phone, Navigation, MapPin, Camera, Check, Package, Loader2 } from "lucide-react";
 import { formatPrice, cn } from "@/lib/utils";
-
-const order = {
-  id: "ORD-20260223-002",
-  customer: "คุณวิชัย",
-  phone: "091-222-3333",
-  address: "อาคาร ABC ชั้น 15 ถ.สาทร กรุงเทพฯ 10120",
-  address_note: "ลิฟต์ฝั่งซ้าย ขึ้นชั้น 15",
-  items: [
-    { name: "กาแฟลาเต้เย็น (L, หวาน 50%)", qty: 2, price: 140, emoji: "☕" },
-    { name: "กาแฟลาเต้เย็น (M, หวานปกติ)", qty: 1, price: 60, emoji: "☕" },
-  ],
-  total: 200,
-  delivery_fee: 20,
-  payment: "พร้อมเพย์ (ชำระแล้ว)",
-  note: "ฝากไว้ที่เคาน์เตอร์ ชั้น 15",
-  distance: "4.1 กม.",
-  status: "ready",
-};
+import { createClient } from "@/lib/supabase/client";
+import { useAuthStore } from "@/stores/auth-store";
+import { getOrderById, updateOrderStatus, subscribeToOrderById } from "@/lib/supabase/queries";
+import type { Order } from "@/types";
 
 export default function DriverOrderDetailPage() {
   const router = useRouter();
-  const [status, setStatus] = useState(order.status);
+  const params = useParams();
+  const orderId = params.id as string;
+
+  const { user } = useAuthStore();
+  const [order, setOrder] = useState<Order | null>(null);
+  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const supabase = useMemo(() => createClient(), []);
+
+  // Load order data
+  useEffect(() => {
+    if (!orderId) return;
+
+    async function loadOrder() {
+      setLoading(true);
+      setError(null);
+      const { data, error: fetchError } = await getOrderById(supabase, orderId);
+      if (fetchError || !data) {
+        setError("ไม่พบออเดอร์นี้");
+        setLoading(false);
+        return;
+      }
+      setOrder(data);
+      setStatus(data.status);
+      setLoading(false);
+    }
+
+    loadOrder();
+  }, [orderId, supabase]);
+
+  // Realtime subscription for live updates
+  useEffect(() => {
+    if (!orderId) return;
+
+    const channel = subscribeToOrderById(supabase, orderId, async () => {
+      // Re-fetch order on any change
+      const { data } = await getOrderById(supabase, orderId);
+      if (data) {
+        setOrder(data);
+        setStatus(data.status);
+      }
+    });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [orderId, supabase]);
 
   const statusFlow = [
     { key: "ready", label: "พร้อมรับ", next: "รับออเดอร์", color: "bg-green-500" },
@@ -37,11 +72,69 @@ export default function DriverOrderDetailPage() {
   const currentIndex = statusFlow.findIndex((s) => s.key === status);
   const nextAction = statusFlow[currentIndex]?.next;
 
-  const handleNextStatus = () => {
-    if (currentIndex < statusFlow.length - 1) {
-      setStatus(statusFlow[currentIndex + 1].key);
+  const handleNextStatus = async () => {
+    if (currentIndex < statusFlow.length - 1 && order) {
+      const nextStatus = statusFlow[currentIndex + 1].key;
+      setUpdating(true);
+      const { error: updateError } = await updateOrderStatus(
+        supabase,
+        order.id,
+        nextStatus,
+        user?.id
+      );
+      if (!updateError) {
+        setStatus(nextStatus);
+      }
+      setUpdating(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 max-w-lg mx-auto">
+        <div className="bg-white px-4 py-4 flex items-center gap-3 shadow-sm">
+          <button onClick={() => router.back()} className="p-1" aria-label="กลับ">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex-1">
+            <div className="h-5 w-32 bg-gray-200 rounded animate-pulse" />
+            <div className="h-3 w-24 bg-gray-200 rounded animate-pulse mt-1" />
+          </div>
+        </div>
+        <div className="px-4 mt-4 space-y-4">
+          <div className="bg-white rounded-2xl p-4 shadow-soft h-20 animate-pulse" />
+          <div className="bg-white rounded-2xl p-4 shadow-soft h-40 animate-pulse" />
+          <div className="bg-white rounded-2xl p-4 shadow-soft h-40 animate-pulse" />
+          <div className="bg-white rounded-2xl p-4 shadow-soft h-48 animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !order) {
+    return (
+      <div className="min-h-screen bg-gray-50 max-w-lg mx-auto">
+        <div className="bg-white px-4 py-4 flex items-center gap-3 shadow-sm">
+          <button onClick={() => router.back()} className="p-1" aria-label="กลับ">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <h1 className="text-lg font-bold">รายละเอียดงาน</h1>
+        </div>
+        <div className="px-4 mt-12 text-center">
+          <Package className="w-16 h-16 text-gray-300 mx-auto mb-3" />
+          <p className="font-semibold text-muted">{error || "ไม่พบออเดอร์"}</p>
+          <button
+            onClick={() => router.back()}
+            className="mt-4 px-6 py-2 bg-primary text-white rounded-xl text-sm"
+          >
+            กลับ
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const deliveryAddress = order.delivery_address;
 
   return (
     <div className="min-h-screen bg-gray-50 max-w-lg mx-auto pb-28">
@@ -52,7 +145,7 @@ export default function DriverOrderDetailPage() {
         </button>
         <div className="flex-1">
           <h1 className="text-lg font-bold">รายละเอียดงาน</h1>
-          <p className="text-xs text-muted">{order.id}</p>
+          <p className="text-xs text-muted">{order.order_number}</p>
         </div>
       </div>
 
@@ -82,18 +175,20 @@ export default function DriverOrderDetailPage() {
         <div className="bg-white rounded-2xl p-4 shadow-soft">
           <h3 className="font-semibold text-sm mb-3">ข้อมูลลูกค้า</h3>
           <div className="space-y-2">
-            <p className="text-sm font-medium">{order.customer}</p>
+            <p className="text-sm font-medium">{order.customer_name}</p>
             <p className="text-xs text-muted flex items-center gap-1">
-              <MapPin className="w-3 h-3" /> {order.address}
+              <MapPin className="w-3 h-3" /> {deliveryAddress?.address_text || "-"}
             </p>
-            {order.address_note && (
-              <p className="text-xs text-orange-500">📝 {order.address_note}</p>
+            {deliveryAddress?.note && (
+              <p className="text-xs text-orange-500">📝 {deliveryAddress.note}</p>
             )}
           </div>
           <div className="flex gap-2 mt-3">
-            <a href={`tel:${order.phone}`} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-xl text-sm font-medium">
-              <Phone className="w-4 h-4" /> โทร
-            </a>
+            {order.customer_phone && (
+              <a href={`tel:${order.customer_phone}`} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-xl text-sm font-medium">
+                <Phone className="w-4 h-4" /> โทร
+              </a>
+            )}
             <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-500 text-white rounded-xl text-sm font-medium">
               <Navigation className="w-4 h-4" /> นำทาง
             </button>
@@ -108,7 +203,6 @@ export default function DriverOrderDetailPage() {
             <div className="text-center">
               <MapPin className="w-8 h-8 text-primary mx-auto" />
               <p className="text-xs text-muted mt-1">แผนที่นำทาง</p>
-              <p className="text-xs font-medium text-primary mt-0.5">{order.distance}</p>
             </div>
           </div>
         </div>
@@ -119,25 +213,43 @@ export default function DriverOrderDetailPage() {
         <div className="bg-white rounded-2xl p-4 shadow-soft">
           <h3 className="font-semibold text-sm mb-3">รายการสินค้า</h3>
           {order.items.map((item, i) => (
-            <div key={i} className="flex items-center gap-3 py-2">
-              <span className="text-xl">{item.emoji}</span>
+            <div key={item.id || i} className="flex items-center gap-3 py-2">
+              <span className="text-xl">📦</span>
               <div className="flex-1">
-                <p className="text-sm">{item.name}</p>
-                <p className="text-xs text-muted">x{item.qty}</p>
+                <p className="text-sm">
+                  {item.product_name}
+                  {item.options && item.options.length > 0 && (
+                    <span className="text-muted text-xs ml-1">
+                      ({item.options.map((o) => o.choice_name).join(", ")})
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-muted">x{item.quantity}</p>
               </div>
-              <span className="text-sm font-medium">{formatPrice(item.price)}</span>
+              <span className="text-sm font-medium">{formatPrice(item.total_price)}</span>
             </div>
           ))}
-          <div className="border-t mt-2 pt-2 flex justify-between">
-            <span className="text-sm font-bold">รวม</span>
-            <span className="text-sm font-bold text-primary">{formatPrice(order.total)}</span>
+          <div className="border-t mt-2 pt-2 space-y-1">
+            {order.delivery_fee > 0 && (
+              <div className="flex justify-between text-xs text-muted">
+                <span>ค่าจัดส่ง</span>
+                <span>{formatPrice(order.delivery_fee)}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-sm font-bold">รวม</span>
+              <span className="text-sm font-bold text-primary">{formatPrice(order.total)}</span>
+            </div>
           </div>
           {order.note && (
             <div className="mt-2 p-2 bg-yellow-50 rounded-lg text-xs text-yellow-700">
               📝 {order.note}
             </div>
           )}
-          <p className="text-xs text-muted mt-2">💳 {order.payment}</p>
+          <p className="text-xs text-muted mt-2">
+            💳 {order.payment_method === "promptpay" ? "พร้อมเพย์" : order.payment_method === "cash" ? "เงินสด" : "โอนเงิน"}
+            {order.payment_status === "paid" ? " (ชำระแล้ว)" : " (รอชำระ)"}
+          </p>
         </div>
       </div>
 
@@ -152,10 +264,17 @@ export default function DriverOrderDetailPage() {
           {nextAction && (
             <button
               onClick={handleNextStatus}
-              className="flex-1 bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-float"
+              disabled={updating}
+              className="flex-1 bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-float disabled:opacity-60"
             >
-              {status === "delivering" ? <Check className="w-5 h-5" /> : <Package className="w-5 h-5" />}
-              {nextAction}
+              {updating ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : status === "delivering" ? (
+                <Check className="w-5 h-5" />
+              ) : (
+                <Package className="w-5 h-5" />
+              )}
+              {updating ? "กำลังอัพเดท..." : nextAction}
             </button>
           )}
           {status === "delivered" && (

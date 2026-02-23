@@ -1,25 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Search, Tag, Calendar, Users, Truck, Gift, Zap, Clock, Edit, Trash2, Pause, Play, BarChart3, Copy } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Search, Tag, Calendar, Users, Truck, Gift, Zap, Clock, Edit, Trash2, Pause, Play, BarChart3, Copy, Loader2 } from "lucide-react";
 import { cn, formatPrice, formatDate } from "@/lib/utils";
-
-type PromotionType = "DELIVERY_DISCOUNT" | "ORDER_DISCOUNT" | "PRODUCT_DISCOUNT" | "BUY_X_GET_Y" | "FLASH_SALE" | "NEW_CUSTOMER" | "HAPPY_HOUR" | "BUNDLE" | "MIN_QUANTITY" | "PAYMENT_METHOD";
-
-interface MockPromotion {
-  id: string;
-  name: string;
-  description: string;
-  type: PromotionType;
-  is_active: boolean;
-  starts_at: string;
-  ends_at: string | null;
-  usage_count: number;
-  max_uses: number | null;
-  budget_spent: number;
-  max_budget: number | null;
-  codes: string[];
-}
+import { createClient } from "@/lib/supabase/client";
+import {
+  getPromotions,
+  getShopId,
+  upsertPromotion,
+  deletePromotion as deletePromotionQuery,
+} from "@/lib/supabase/queries";
+import type { Promotion } from "@/types";
 
 const typeConfig: Record<string, { label: string; icon: React.ElementType; color: string }> = {
   DELIVERY_DISCOUNT: { label: "ส่วนลดค่าส่ง", icon: Truck, color: "bg-blue-100 text-blue-700" },
@@ -34,51 +25,105 @@ const typeConfig: Record<string, { label: string; icon: React.ElementType; color
   PAYMENT_METHOD: { label: "วิธีชำระเงิน", icon: Tag, color: "bg-rose-100 text-rose-700" },
 };
 
-const mockPromotions: MockPromotion[] = [
-  {
-    id: "promo-1", name: "ส่งฟรี มื้อกลางวัน", description: "ฟรีค่าส่งภายใน 3 กม. (จ-ศ 11-13น.) สั่งขั้นต่ำ 150฿",
-    type: "DELIVERY_DISCOUNT", is_active: true, starts_at: "2026-03-01", ends_at: "2026-03-31",
-    usage_count: 234, max_uses: 1000, budget_spent: 11800, max_budget: 50000, codes: ["FREEDEL"],
-  },
-  {
-    id: "promo-2", name: "ซื้อกาแฟ 2 แถมเค้ก", description: "ซื้อกาแฟ 2 แก้ว แถมเค้กชิ้นเล็ก 1",
-    type: "BUY_X_GET_Y", is_active: true, starts_at: "2026-02-01", ends_at: null,
-    usage_count: 89, max_uses: null, budget_spent: 6675, max_budget: null, codes: [],
-  },
-  {
-    id: "promo-3", name: "Flash Sale ชานม 29฿", description: "ชานมไข่มุก ราคาพิเศษ 29฿ (จาก 55฿) จำกัด 50 แก้ว",
-    type: "FLASH_SALE", is_active: true, starts_at: "2026-02-25", ends_at: "2026-02-25",
-    usage_count: 0, max_uses: 50, budget_spent: 0, max_budget: null, codes: [],
-  },
-  {
-    id: "promo-4", name: "ลูกค้าใหม่ลด 50%", description: "ออเดอร์แรก ลด 50% สูงสุด 100฿ + ฟรีค่าส่ง",
-    type: "NEW_CUSTOMER", is_active: false, starts_at: "2026-01-01", ends_at: "2026-02-15",
-    usage_count: 1000, max_uses: 1000, budget_spent: 85000, max_budget: 100000, codes: ["NEWBIE50"],
-  },
-  {
-    id: "promo-5", name: "Happy Hour 14-16น.", description: "ทุกเมนูลด 25% ช่วง 14:00-16:00 ทุกวัน",
-    type: "HAPPY_HOUR", is_active: true, starts_at: "2026-02-01", ends_at: null,
-    usage_count: 567, max_uses: null, budget_spent: 28350, max_budget: null, codes: [],
-  },
-  {
-    id: "promo-6", name: "สั่ง 5 แก้วลด 10%", description: "สั่ง 5 แก้วขึ้นไป ลดทั้งออเดอร์ 10%",
-    type: "MIN_QUANTITY", is_active: true, starts_at: "2026-02-01", ends_at: null,
-    usage_count: 145, max_uses: null, budget_spent: 14500, max_budget: null, codes: [],
-  },
-];
-
 const filterOptions = ["ทั้งหมด", "กำลังใช้งาน", "หยุดชั่วคราว", "หมดอายุ", "ยังไม่เริ่ม"];
 
 export default function PromotionsPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ทั้งหมด");
   const [showCreate, setShowCreate] = useState(false);
-  const [promotions, setPromotions] = useState(mockPromotions);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const toggleActive = (id: string) => {
-    setPromotions((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, is_active: !p.is_active } : p))
-    );
+  // Create form state
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState("DELIVERY_DISCOUNT");
+  const [newStartsAt, setNewStartsAt] = useState("");
+  const [newEndsAt, setNewEndsAt] = useState("");
+  const [newMinOrder, setNewMinOrder] = useState("");
+  const [newDiscount, setNewDiscount] = useState("");
+  const [newMaxDiscount, setNewMaxDiscount] = useState("");
+  const [newCode, setNewCode] = useState("");
+  const [newMaxUses, setNewMaxUses] = useState("");
+  const [newMaxPerCustomer, setNewMaxPerCustomer] = useState("");
+  const [newMaxBudget, setNewMaxBudget] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const shopId = getShopId();
+
+  const fetchPromotions = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await getPromotions(supabase, shopId);
+    if (data) setPromotions(data);
+    setLoading(false);
+  }, [shopId]);
+
+  useEffect(() => {
+    fetchPromotions();
+  }, [fetchPromotions]);
+
+  const toggleActive = async (id: string) => {
+    const promo = promotions.find((p) => p.id === id);
+    if (!promo) return;
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("promotions")
+      .update({ is_active: !promo.is_active })
+      .eq("id", id);
+
+    if (!error) {
+      setPromotions((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, is_active: !p.is_active } : p))
+      );
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    const supabase = createClient();
+    const { error } = await deletePromotionQuery(supabase, id);
+    if (!error) {
+      setPromotions((prev) => prev.filter((p) => p.id !== id));
+    }
+  };
+
+  const handleSaveNew = async () => {
+    if (!newName.trim() || !newStartsAt) return;
+    setSaving(true);
+
+    const supabase = createClient();
+    const payload: Record<string, unknown> = {
+      shop_id: shopId,
+      name: newName.trim(),
+      promotion_type: newType,
+      starts_at: newStartsAt,
+      ends_at: newEndsAt || null,
+      is_active: true,
+      priority: 0,
+      conditions: {
+        min_order_amount: newMinOrder ? Number(newMinOrder) : null,
+      },
+      actions: {
+        discount_value: newDiscount ? Number(newDiscount) : null,
+        max_discount: newMaxDiscount ? Number(newMaxDiscount) : null,
+      },
+      limits: {
+        max_total_uses: newMaxUses ? Number(newMaxUses) : null,
+        max_uses_per_customer: newMaxPerCustomer ? Number(newMaxPerCustomer) : null,
+        max_total_budget: newMaxBudget ? Number(newMaxBudget) : null,
+        current_spent: 0,
+      },
+    };
+
+    const { error } = await upsertPromotion(supabase, payload);
+    if (!error) {
+      await fetchPromotions();
+      setShowCreate(false);
+      // Reset form
+      setNewName(""); setNewType("DELIVERY_DISCOUNT"); setNewStartsAt(""); setNewEndsAt("");
+      setNewMinOrder(""); setNewDiscount(""); setNewMaxDiscount(""); setNewCode("");
+      setNewMaxUses(""); setNewMaxPerCustomer(""); setNewMaxBudget("");
+    }
+    setSaving(false);
   };
 
   const now = new Date().toISOString();
@@ -90,6 +135,14 @@ export default function PromotionsPage() {
     if (filter === "ยังไม่เริ่ม") return p.starts_at > now;
     return true;
   });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -115,11 +168,11 @@ export default function PromotionsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="text-sm font-medium mb-1.5 block">ชื่อโปรโมชั่น</label>
-              <input type="text" placeholder="เช่น ส่งฟรีเดือนมีนา" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+              <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="เช่น ส่งฟรีเดือนมีนา" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
             </div>
             <div>
               <label className="text-sm font-medium mb-1.5 block">ประเภท</label>
-              <select className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary bg-white">
+              <select value={newType} onChange={(e) => setNewType(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary bg-white">
                 {Object.entries(typeConfig).map(([key, val]) => (
                   <option key={key} value={key}>{val.label}</option>
                 ))}
@@ -129,11 +182,11 @@ export default function PromotionsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="text-sm font-medium mb-1.5 block">วันเริ่มต้น</label>
-              <input type="date" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+              <input type="date" value={newStartsAt} onChange={(e) => setNewStartsAt(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
             </div>
             <div>
               <label className="text-sm font-medium mb-1.5 block">วันสิ้นสุด</label>
-              <input type="date" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+              <input type="date" value={newEndsAt} onChange={(e) => setNewEndsAt(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
             </div>
           </div>
 
@@ -143,19 +196,19 @@ export default function PromotionsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm text-muted mb-1 block">ยอดสั่งซื้อขั้นต่ำ (฿)</label>
-                <input type="number" placeholder="0" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <input type="number" value={newMinOrder} onChange={(e) => setNewMinOrder(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
               </div>
               <div>
                 <label className="text-sm text-muted mb-1 block">ส่วนลด (% หรือ ฿)</label>
-                <input type="number" placeholder="0" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <input type="number" value={newDiscount} onChange={(e) => setNewDiscount(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
               </div>
               <div>
                 <label className="text-sm text-muted mb-1 block">ส่วนลดสูงสุด (฿)</label>
-                <input type="number" placeholder="ไม่จำกัด" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <input type="number" value={newMaxDiscount} onChange={(e) => setNewMaxDiscount(e.target.value)} placeholder="ไม่จำกัด" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
               </div>
               <div>
                 <label className="text-sm text-muted mb-1 block">โค้ดส่วนลด</label>
-                <input type="text" placeholder="เช่น FREEDEL50" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <input type="text" value={newCode} onChange={(e) => setNewCode(e.target.value)} placeholder="เช่น FREEDEL50" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
               </div>
             </div>
           </div>
@@ -166,15 +219,15 @@ export default function PromotionsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="text-sm text-muted mb-1 block">จำนวนใช้สูงสุด</label>
-                <input type="number" placeholder="ไม่จำกัด" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <input type="number" value={newMaxUses} onChange={(e) => setNewMaxUses(e.target.value)} placeholder="ไม่จำกัด" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
               </div>
               <div>
                 <label className="text-sm text-muted mb-1 block">ต่อลูกค้า (ครั้ง)</label>
-                <input type="number" placeholder="ไม่จำกัด" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <input type="number" value={newMaxPerCustomer} onChange={(e) => setNewMaxPerCustomer(e.target.value)} placeholder="ไม่จำกัด" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
               </div>
               <div>
                 <label className="text-sm text-muted mb-1 block">งบประมาณรวม (฿)</label>
-                <input type="number" placeholder="ไม่จำกัด" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                <input type="number" value={newMaxBudget} onChange={(e) => setNewMaxBudget(e.target.value)} placeholder="ไม่จำกัด" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
               </div>
             </div>
           </div>
@@ -183,8 +236,8 @@ export default function PromotionsPage() {
             <button onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50">
               ยกเลิก
             </button>
-            <button className="px-6 py-2 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors">
-              บันทึก
+            <button onClick={handleSaveNew} disabled={saving || !newName.trim()} className="px-6 py-2 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors disabled:opacity-50">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "บันทึก"}
             </button>
           </div>
         </div>
@@ -223,10 +276,13 @@ export default function PromotionsPage() {
       {/* Promotion Cards */}
       <div className="space-y-3">
         {filtered.map((promo) => {
-          const config = typeConfig[promo.type] || typeConfig.ORDER_DISCOUNT;
+          const config = typeConfig[promo.promotion_type] || typeConfig.ORDER_DISCOUNT;
           const Icon = config.icon;
           const isExpired = promo.ends_at && promo.ends_at < now;
-          const isFull = promo.max_uses && promo.usage_count >= promo.max_uses;
+          const maxTotalUses = promo.limits?.max_total_uses;
+          const isFull = maxTotalUses && promo.usage_count >= maxTotalUses;
+          const maxBudget = promo.limits?.max_total_budget;
+          const currentSpent = promo.limits?.current_spent || 0;
 
           return (
             <div key={promo.id} className={cn("bg-white rounded-2xl p-5 shadow-soft border", promo.is_active && !isExpired ? "border-transparent" : "border-gray-200 opacity-75")}>
@@ -261,29 +317,29 @@ export default function PromotionsPage() {
                     </span>
                     <span className="flex items-center gap-1">
                       <BarChart3 className="w-3 h-3" />
-                      ใช้แล้ว {promo.usage_count}{promo.max_uses ? `/${promo.max_uses}` : ""} ครั้ง
+                      ใช้แล้ว {promo.usage_count}{maxTotalUses ? `/${maxTotalUses}` : ""} ครั้ง
                     </span>
-                    {promo.max_budget && (
-                      <span>งบ: {formatPrice(promo.budget_spent)}/{formatPrice(promo.max_budget)}</span>
+                    {maxBudget && (
+                      <span>งบ: {formatPrice(currentSpent)}/{formatPrice(maxBudget)}</span>
                     )}
                   </div>
 
                   {/* Progress bar */}
-                  {promo.max_uses && (
+                  {maxTotalUses && (
                     <div className="mt-2 w-full bg-gray-100 rounded-full h-1.5">
                       <div
-                        className={cn("h-1.5 rounded-full transition-all", promo.usage_count >= promo.max_uses ? "bg-red-400" : "bg-primary")}
-                        style={{ width: `${Math.min((promo.usage_count / promo.max_uses) * 100, 100)}%` }}
+                        className={cn("h-1.5 rounded-full transition-all", promo.usage_count >= maxTotalUses ? "bg-red-400" : "bg-primary")}
+                        style={{ width: `${Math.min((promo.usage_count / maxTotalUses) * 100, 100)}%` }}
                       />
                     </div>
                   )}
 
                   {/* Codes */}
-                  {promo.codes.length > 0 && (
+                  {promo.codes && promo.codes.length > 0 && (
                     <div className="flex gap-1.5 mt-2">
-                      {promo.codes.map((code) => (
-                        <span key={code} className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 rounded text-[11px] font-mono">
-                          {code}
+                      {promo.codes.map((codeObj) => (
+                        <span key={codeObj.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 rounded text-[11px] font-mono">
+                          {codeObj.code}
                           <Copy className="w-3 h-3 text-muted cursor-pointer hover:text-primary" />
                         </span>
                       ))}
@@ -299,7 +355,7 @@ export default function PromotionsPage() {
                   <button className="p-2 rounded-lg hover:bg-gray-50 text-gray-400" aria-label="แก้ไข">
                     <Edit className="w-4 h-4" />
                   </button>
-                  <button className="p-2 rounded-lg hover:bg-red-50 text-red-400" aria-label="ลบ">
+                  <button onClick={() => handleDelete(promo.id)} className="p-2 rounded-lg hover:bg-red-50 text-red-400" aria-label="ลบ">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>

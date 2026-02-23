@@ -1,15 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Phone, MapPin, Clock, Star, Edit, Trash2, Search } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Phone, MapPin, Clock, Star, Edit, Trash2, Search, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const mockDrivers = [
-  { id: "d1", name: "สมชาย ดีมาก", phone: "089-123-4567", avatar: "🧑‍💼", status: "available" as const, total_deliveries: 342, rating: 4.8, today_deliveries: 12, joined: "2025-06-15" },
-  { id: "d2", name: "สมหญิง ใจดี", phone: "091-234-5678", avatar: "👩‍💼", status: "busy" as const, total_deliveries: 256, rating: 4.9, today_deliveries: 8, joined: "2025-08-20" },
-  { id: "d3", name: "วิชัย ส่งไว", phone: "082-345-6789", avatar: "🧑‍💼", status: "available" as const, total_deliveries: 189, rating: 4.7, today_deliveries: 5, joined: "2025-10-01" },
-  { id: "d4", name: "นภา จัดส่ง", phone: "093-456-7890", avatar: "👩‍💼", status: "offline" as const, total_deliveries: 78, rating: 4.5, today_deliveries: 0, joined: "2026-01-10" },
-];
+import { createClient } from "@/lib/supabase/client";
+import { getDrivers, getShopId } from "@/lib/supabase/queries";
+import type { Driver } from "@/types";
 
 const statusConfig = {
   available: { label: "ว่าง", color: "bg-green-100 text-green-700", dot: "bg-green-500" },
@@ -20,19 +16,42 @@ const statusConfig = {
 export default function DriversPage() {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = mockDrivers.filter((d) => {
+  const shopId = getShopId();
+
+  const fetchDrivers = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await getDrivers(supabase, shopId);
+    if (data) setDrivers(data);
+    setLoading(false);
+  }, [shopId]);
+
+  useEffect(() => {
+    fetchDrivers();
+  }, [fetchDrivers]);
+
+  const filtered = drivers.filter((d) => {
     if (search && !d.name.toLowerCase().includes(search.toLowerCase())) return false;
     if (filterStatus !== "all" && d.status !== filterStatus) return false;
     return true;
   });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-xl font-bold">พนักงานจัดส่ง</h1>
-          <p className="text-sm text-muted mt-0.5">{mockDrivers.length} คน — ว่าง {mockDrivers.filter((d) => d.status === "available").length} คน</p>
+          <p className="text-sm text-muted mt-0.5">{drivers.length} คน — ว่าง {drivers.filter((d) => d.status === "available").length} คน</p>
         </div>
         <button className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors">
           <Plus className="w-4 h-4" />
@@ -67,13 +86,17 @@ export default function DriversPage() {
       {/* Driver Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filtered.map((driver) => {
-          const status = statusConfig[driver.status];
+          const status = statusConfig[driver.status] || statusConfig.offline;
           return (
             <div key={driver.id} className="bg-white rounded-2xl p-5 shadow-soft">
               <div className="flex items-start gap-4">
                 <div className="relative">
                   <div className="w-14 h-14 bg-mint-100 rounded-2xl flex items-center justify-center text-3xl">
-                    {driver.avatar}
+                    {driver.avatar_url ? (
+                      <img src={driver.avatar_url} alt={driver.name} className="w-full h-full rounded-2xl object-cover" />
+                    ) : (
+                      "🧑‍💼"
+                    )}
                   </div>
                   <div className={cn("absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-white", status.dot)} />
                 </div>
@@ -89,16 +112,8 @@ export default function DriversPage() {
                   </p>
                   <div className="flex gap-4 mt-3 text-xs text-muted">
                     <span className="flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />
-                      วันนี้ {driver.today_deliveries} งาน
-                    </span>
-                    <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       รวม {driver.total_deliveries} งาน
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Star className="w-3 h-3 text-yellow-500" />
-                      {driver.rating}
                     </span>
                   </div>
                 </div>
@@ -115,6 +130,10 @@ export default function DriversPage() {
           );
         })}
       </div>
+
+      {filtered.length === 0 && (
+        <div className="text-center py-12 text-muted text-sm">ไม่พบพนักงาน</div>
+      )}
     </div>
   );
 }

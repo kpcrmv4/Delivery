@@ -1,19 +1,69 @@
 "use client";
 
+import { useState, useEffect, useMemo } from "react";
 import { MapPin, Check, X } from "lucide-react";
 import { formatPrice, cn } from "@/lib/utils";
-
-const deliveries = [
-  { id: "ORD-20260223-001", customer: "คุณสมศรี", address: "หมู่บ้านสวนสวย ลาดพร้าว 71", total: 175, status: "delivered", distance: "2.3 กม.", time: "10:30", date: "วันนี้" },
-  { id: "ORD-20260222-012", customer: "คุณมานี", address: "คอนโด The Line สุขุมวิท", total: 220, status: "delivered", distance: "3.8 กม.", time: "14:20", date: "เมื่อวาน" },
-  { id: "ORD-20260222-008", customer: "คุณพิชัย", address: "ออฟฟิศ สีลม", total: 350, status: "delivered", distance: "5.2 กม.", time: "12:00", date: "เมื่อวาน" },
-  { id: "ORD-20260222-005", customer: "คุณนิดา", address: "หมู่บ้านเสนา ลาดพร้าว", total: 155, status: "cancelled", distance: "1.5 กม.", time: "09:30", date: "เมื่อวาน" },
-  { id: "ORD-20260221-020", customer: "คุณสมปอง", address: "ตลาดนัดจตุจักร", total: 480, status: "delivered", distance: "7.0 กม.", time: "16:45", date: "21 ก.พ." },
-];
+import { createClient } from "@/lib/supabase/client";
+import { useAuthStore } from "@/stores/auth-store";
+import { getOrders } from "@/lib/supabase/queries";
+import type { Order } from "@/types";
 
 export default function DriverHistoryPage() {
+  const { user } = useAuthStore();
+  const [deliveries, setDeliveries] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const supabase = useMemo(() => createClient(), []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    async function loadHistory() {
+      setLoading(true);
+      const { data } = await getOrders(supabase, {
+        driverId: user!.id,
+        status: "delivered",
+      });
+      setDeliveries(data || []);
+      setLoading(false);
+    }
+
+    loadHistory();
+  }, [user?.id, supabase]);
+
   const delivered = deliveries.filter((d) => d.status === "delivered").length;
-  const totalEarning = delivered * 30;
+  const totalEarning = delivered * 30; // 30 THB per delivery
+
+  // Format relative date
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) return "วันนี้";
+    if (date.toDateString() === yesterday.toDateString()) return "เมื่อวาน";
+
+    return date.toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="bg-white px-4 py-4 shadow-sm">
+          <div className="h-5 w-36 bg-gray-200 rounded animate-pulse" />
+        </div>
+        <div className="px-4 mt-4">
+          <div className="bg-gradient-to-r from-primary to-primary-dark rounded-2xl p-4 h-20 animate-pulse" />
+        </div>
+        <div className="px-4 mt-4 space-y-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-white rounded-2xl p-4 shadow-soft h-28 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -46,9 +96,12 @@ export default function DriverHistoryPage() {
         {deliveries.map((d) => (
           <div key={d.id} className={cn("bg-white rounded-2xl p-4 shadow-soft", d.status === "cancelled" && "opacity-60")}>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-mono text-muted">{d.id}</span>
+              <span className="text-xs font-mono text-muted">{d.order_number}</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-muted">{d.date} {d.time}</span>
+                <span className="text-[10px] text-muted">
+                  {formatDate(d.created_at)}{" "}
+                  {new Date(d.created_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}
+                </span>
                 {d.status === "delivered" ? (
                   <span className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center">
                     <Check className="w-3 h-3 text-green-600" />
@@ -60,16 +113,22 @@ export default function DriverHistoryPage() {
                 )}
               </div>
             </div>
-            <h3 className="text-sm font-medium">{d.customer}</h3>
+            <h3 className="text-sm font-medium">{d.customer_name}</h3>
             <p className="text-xs text-muted mt-0.5 flex items-center gap-1">
-              <MapPin className="w-3 h-3" /> {d.address}
+              <MapPin className="w-3 h-3" /> {d.delivery_address?.address_text || "-"}
             </p>
             <div className="flex items-center justify-between mt-2 text-xs text-muted">
-              <span>{d.distance}</span>
+              <span>{d.items.length} รายการ</span>
               <span className="font-bold text-sm text-foreground">{formatPrice(d.total)}</span>
             </div>
           </div>
         ))}
+
+        {deliveries.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-muted">ยังไม่มีประวัติการจัดส่ง</p>
+          </div>
+        )}
       </div>
     </div>
   );

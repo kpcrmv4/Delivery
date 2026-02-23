@@ -1,7 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { User, MapPin, ClipboardList, Settings, HelpCircle, LogOut, ChevronRight, Bell, CreditCard, Gift } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/stores/auth-store";
 
 const menuItems = [
   { icon: ClipboardList, label: "ประวัติการสั่งซื้อ", href: "/orders", color: "text-blue-500" },
@@ -14,6 +17,52 @@ const menuItems = [
 ];
 
 export default function ProfilePage() {
+  const router = useRouter();
+  const { profile, isAuthenticated, isLoading, initialize, logout } = useAuthStore();
+
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.push("/auth/login");
+    }
+  }, [isLoading, isAuthenticated, router]);
+
+  const handleLogout = async () => {
+    await logout();
+    router.push("/auth/login");
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="bg-gradient-to-br from-primary to-primary-dark px-6 pt-8 pb-12 rounded-b-3xl">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 bg-white/20 backdrop-blur rounded-full animate-pulse" />
+            <div className="space-y-2">
+              <div className="w-24 h-5 bg-white/30 rounded animate-pulse" />
+              <div className="w-20 h-3 bg-white/20 rounded animate-pulse" />
+            </div>
+          </div>
+          <div className="flex gap-4 mt-6">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex-1 bg-white/15 backdrop-blur rounded-xl p-3 text-center">
+                <div className="w-8 h-6 bg-white/30 rounded animate-pulse mx-auto" />
+                <div className="w-12 h-2 bg-white/20 rounded animate-pulse mx-auto mt-2" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Profile Header */}
@@ -23,23 +72,23 @@ export default function ProfilePage() {
             <User className="w-8 h-8 text-white" />
           </div>
           <div className="text-white">
-            <h1 className="text-xl font-bold">คุณลูกค้า</h1>
-            <p className="text-sm opacity-80">099-999-9999</p>
+            <h1 className="text-xl font-bold">{profile?.full_name || "คุณลูกค้า"}</h1>
+            <p className="text-sm opacity-80">{profile?.phone || profile?.email || ""}</p>
           </div>
         </div>
 
         {/* Stats */}
         <div className="flex gap-4 mt-6">
           <div className="flex-1 bg-white/15 backdrop-blur rounded-xl p-3 text-center text-white">
-            <p className="text-xl font-bold">12</p>
+            <p className="text-xl font-bold">-</p>
             <p className="text-[10px] opacity-80">คำสั่งซื้อ</p>
           </div>
           <div className="flex-1 bg-white/15 backdrop-blur rounded-xl p-3 text-center text-white">
-            <p className="text-xl font-bold">150</p>
+            <p className="text-xl font-bold">0</p>
             <p className="text-[10px] opacity-80">แต้มสะสม</p>
           </div>
           <div className="flex-1 bg-white/15 backdrop-blur rounded-xl p-3 text-center text-white">
-            <p className="text-xl font-bold">3</p>
+            <p className="text-xl font-bold">0</p>
             <p className="text-[10px] opacity-80">คูปอง</p>
           </div>
         </div>
@@ -64,7 +113,10 @@ export default function ProfilePage() {
         </div>
 
         {/* Logout */}
-        <button className="w-full mt-4 bg-white rounded-2xl shadow-soft px-4 py-3.5 flex items-center gap-3 hover:bg-red-50 transition-colors">
+        <button
+          onClick={handleLogout}
+          className="w-full mt-4 bg-white rounded-2xl shadow-soft px-4 py-3.5 flex items-center gap-3 hover:bg-red-50 transition-colors"
+        >
           <div className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center text-red-500">
             <LogOut className="w-5 h-5" />
           </div>

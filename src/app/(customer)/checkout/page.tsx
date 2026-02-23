@@ -1,15 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowLeft, MapPin, Clock, CreditCard, Banknote, QrCode, Calendar, Truck, Store } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCartStore } from "@/stores/cart-store";
+import { useAuthStore } from "@/stores/auth-store";
+import { createClient } from "@/lib/supabase/client";
+import { getCustomerAddresses, getShopId } from "@/lib/supabase/queries";
 import { formatPrice, cn } from "@/lib/utils";
-
-const mockAddresses = [
-  { id: "addr-1", label: "บ้าน", address_text: "123/45 หมู่บ้านสวนสวย ซ.ลาดพร้าว 71 กรุงเทพฯ 10230", latitude: 13.8, longitude: 100.6, note: "ตึกซ้ายมือ", is_default: true },
-  { id: "addr-2", label: "ที่ทำงาน", address_text: "อาคาร ABC ชั้น 15 ถ.สาทร กรุงเทพฯ 10120", latitude: 13.72, longitude: 100.53, note: "", is_default: false },
-];
+import type { CustomerAddress } from "@/types";
 
 const timeSlots = [
   "09:00 - 09:30", "09:30 - 10:00", "10:00 - 10:30", "10:30 - 11:00",
@@ -19,22 +18,124 @@ const timeSlots = [
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, getSubtotal } = useCartStore();
+  const { items, getSubtotal, clearCart } = useCartStore();
+  const { user, profile, isAuthenticated, initialize } = useAuthStore();
+
   const [orderType, setOrderType] = useState<"delivery" | "pickup">("delivery");
-  const [selectedAddress, setSelectedAddress] = useState(mockAddresses[0]);
+  const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState<CustomerAddress | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "transfer" | "promptpay">("promptpay");
   const [isScheduled, setIsScheduled] = useState(false);
   const [selectedDate, setSelectedDate] = useState("วันนี้");
   const [selectedSlot, setSelectedSlot] = useState("");
   const [note, setNote] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  // Manual address input for non-logged-in users
+  const [manualAddress, setManualAddress] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
+  const [manualName, setManualName] = useState("");
 
   const subtotal = getSubtotal();
   const distance = 2.3;
   const deliveryFee = orderType === "pickup" ? 0 : (subtotal >= 150 ? 0 : 30);
   const total = subtotal + deliveryFee;
 
-  const handleConfirmOrder = () => {
-    router.push("/orders/ORD-20260223-001");
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  useEffect(() => {
+    const supabase = createClient();
+
+    async function loadAddresses() {
+      setIsLoading(true);
+      if (user?.id) {
+        const { data } = await getCustomerAddresses(supabase, user.id);
+        if (data && data.length > 0) {
+          setAddresses(data);
+          const defaultAddr = data.find((a) => a.is_default) || data[0];
+          setSelectedAddress(defaultAddr);
+        }
+      }
+      setIsLoading(false);
+    }
+
+    loadAddresses();
+  }, [user?.id]);
+
+  const handleConfirmOrder = async () => {
+    setIsSubmitting(true);
+    setSubmitError("");
+
+    try {
+      const deliveryAddress = isAuthenticated && selectedAddress
+        ? {
+            label: selectedAddress.label,
+            address_text: selectedAddress.address_text,
+            latitude: selectedAddress.latitude,
+            longitude: selectedAddress.longitude,
+            note: selectedAddress.note || "",
+          }
+        : {
+            label: "ที่อยู่จัดส่ง",
+            address_text: manualAddress,
+            latitude: 0,
+            longitude: 0,
+            note: "",
+          };
+
+      const orderItems = items.map((item) => ({
+        product_id: item.product.id,
+        product_name: item.product.name,
+        product_image: item.product.image_url,
+        product_price: item.product.price,
+        quantity: item.quantity,
+        options: item.selected_options,
+        item_note: item.note || "",
+        total_price: item.total_price,
+      }));
+
+      const payload = {
+        shop_id: getShopId(),
+        subtotal,
+        delivery_fee: deliveryFee,
+        discount: 0,
+        total,
+        payment_method: paymentMethod,
+        delivery_address: orderType === "delivery" ? deliveryAddress : null,
+        customer_phone: isAuthenticated ? (profile?.phone || "") : manualPhone,
+        customer_name: isAuthenticated ? (profile?.full_name || "") : manualName,
+        order_type: orderType,
+        scheduled_date: isScheduled ? selectedDate : null,
+        scheduled_slot: isScheduled ? selectedSlot : null,
+        note,
+        items: orderItems,
+      };
+
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok || result.error) {
+        setSubmitError(result.error || "เกิดข้อผิดพลาดในการสั่งซื้อ");
+        setIsSubmitting(false);
+        return;
+      }
+
+      clearCart();
+      const orderId = result.data?.id;
+      router.push(`/orders/${orderId}`);
+    } catch {
+      setSubmitError("เกิดข้อผิดพลาด กรุณาลองอีกครั้ง");
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -97,30 +198,57 @@ export default function CheckoutPage() {
                 <MapPin className="w-4 h-4 text-primary" />
                 ที่อยู่จัดส่ง
               </h3>
-              <div className="space-y-2">
-                {mockAddresses.map((addr) => (
-                  <button
-                    key={addr.id}
-                    onClick={() => setSelectedAddress(addr)}
-                    className={cn(
-                      "w-full text-left p-3 rounded-xl border transition-all",
-                      selectedAddress.id === addr.id
-                        ? "border-primary bg-primary/5"
-                        : "border-gray-200"
-                    )}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm">{addr.label}</span>
-                      {addr.is_default && (
-                        <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                          ค่าเริ่มต้น
-                        </span>
+
+              {isAuthenticated && addresses.length > 0 ? (
+                <div className="space-y-2">
+                  {addresses.map((addr) => (
+                    <button
+                      key={addr.id}
+                      onClick={() => setSelectedAddress(addr)}
+                      className={cn(
+                        "w-full text-left p-3 rounded-xl border transition-all",
+                        selectedAddress?.id === addr.id
+                          ? "border-primary bg-primary/5"
+                          : "border-gray-200"
                       )}
-                    </div>
-                    <p className="text-xs text-muted mt-1 line-clamp-2">{addr.address_text}</p>
-                  </button>
-                ))}
-              </div>
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-sm">{addr.label}</span>
+                        {addr.is_default && (
+                          <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                            ค่าเริ่มต้น
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted mt-1 line-clamp-2">{addr.address_text}</p>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={manualName}
+                    onChange={(e) => setManualName(e.target.value)}
+                    placeholder="ชื่อผู้รับ"
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                  <input
+                    type="text"
+                    value={manualPhone}
+                    onChange={(e) => setManualPhone(e.target.value)}
+                    placeholder="เบอร์โทร"
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    inputMode="tel"
+                  />
+                  <textarea
+                    value={manualAddress}
+                    onChange={(e) => setManualAddress(e.target.value)}
+                    placeholder="ที่อยู่จัดส่ง"
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -288,14 +416,28 @@ export default function CheckoutPage() {
         </div>
       </div>
 
+      {/* Error */}
+      {submitError && (
+        <div className="px-4 mt-4">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-600">
+            {submitError}
+          </div>
+        </div>
+      )}
+
       {/* Bottom CTA */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 safe-bottom z-50">
         <div className="max-w-lg mx-auto">
           <button
             onClick={handleConfirmOrder}
-            className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-float"
+            disabled={isSubmitting}
+            className="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors shadow-float disabled:opacity-70"
           >
-            ยืนยันสั่งซื้อ — {formatPrice(total)}
+            {isSubmitting ? (
+              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <>ยืนยันสั่งซื้อ — {formatPrice(total)}</>
+            )}
           </button>
         </div>
       </div>

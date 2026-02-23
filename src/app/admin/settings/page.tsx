@@ -1,13 +1,119 @@
 "use client";
 
-import { useState } from "react";
-import { Store, Clock, MapPin, CreditCard, Bell, Calendar, Package, Save } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Store, Clock, MapPin, CreditCard, Bell, Calendar, Package, Save, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { getShop, getShopId } from "@/lib/supabase/queries";
+import type { Shop } from "@/types";
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("shop");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [shop, setShop] = useState<Shop | null>(null);
+
+  // Editable shop fields
+  const [shopName, setShopName] = useState("");
+  const [shopPhone, setShopPhone] = useState("");
+  const [shopAddress, setShopAddress] = useState("");
   const [isOpen, setIsOpen] = useState(true);
+  const [openingHours, setOpeningHours] = useState<Shop["opening_hours"]>({});
+  const [deliveryZones, setDeliveryZones] = useState<Shop["delivery_zones"]>([]);
+  const [minOrderAmount, setMinOrderAmount] = useState(100);
+  const [settings, setSettings] = useState<Shop["settings"]>({
+    currency: "THB",
+    tax_rate: 0,
+    accept_cash: true,
+    accept_transfer: true,
+    accept_promptpay: true,
+  });
+  const [promptpayId, setPromptpayId] = useState("");
   const [schedulingEnabled, setSchedulingEnabled] = useState(true);
+  const [schedulingSettings, setSchedulingSettings] = useState<Shop["scheduling_settings"]>({
+    enabled: true,
+    min_advance_minutes: 60,
+    max_advance_days: 3,
+    slot_interval_minutes: 30,
+    max_orders_per_slot: 10,
+    blocked_dates: [],
+    blocked_weekdays: [],
+    blocked_slots: [],
+  });
+  const [orderLimits, setOrderLimits] = useState<Shop["order_limits"]>({
+    max_items_per_order: 20,
+    max_orders_per_day: 200,
+  });
+
+  const shopId = getShopId();
+
+  const fetchShop = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await getShop(supabase, shopId);
+    if (data) {
+      setShop(data);
+      setShopName(data.name || "");
+      setShopPhone(data.phone || "");
+      setShopAddress(data.address || "");
+      setIsOpen(data.is_open ?? true);
+      setOpeningHours(data.opening_hours || {});
+      setDeliveryZones(data.delivery_zones || []);
+      setMinOrderAmount(data.min_order_amount || 100);
+      setSettings(data.settings || { currency: "THB", tax_rate: 0, accept_cash: true, accept_transfer: true, accept_promptpay: true });
+      setPromptpayId(data.promptpay_id || "");
+      setSchedulingEnabled(data.scheduling_settings?.enabled ?? true);
+      setSchedulingSettings(data.scheduling_settings || {
+        enabled: true, min_advance_minutes: 60, max_advance_days: 3,
+        slot_interval_minutes: 30, max_orders_per_slot: 10,
+        blocked_dates: [], blocked_weekdays: [], blocked_slots: [],
+      });
+      setOrderLimits(data.order_limits || { max_items_per_order: 20, max_orders_per_day: 200 });
+    }
+    setLoading(false);
+  }, [shopId]);
+
+  useEffect(() => {
+    fetchShop();
+  }, [fetchShop]);
+
+  const handleSave = async (updates: Record<string, unknown>) => {
+    setSaving(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("shops")
+      .update(updates)
+      .eq("id", shopId);
+
+    if (!error) {
+      await fetchShop();
+    }
+    setSaving(false);
+  };
+
+  const saveShopInfo = () => handleSave({
+    name: shopName,
+    phone: shopPhone,
+    address: shopAddress,
+    is_open: isOpen,
+  });
+
+  const saveHours = () => handleSave({ opening_hours: openingHours });
+
+  const saveDelivery = () => handleSave({
+    delivery_zones: deliveryZones,
+    min_order_amount: minOrderAmount,
+  });
+
+  const savePayment = () => handleSave({
+    settings,
+    promptpay_id: promptpayId,
+  });
+
+  const saveScheduling = () => handleSave({
+    scheduling_settings: { ...schedulingSettings, enabled: schedulingEnabled },
+  });
+
+  const saveLimits = () => handleSave({ order_limits: orderLimits });
 
   const tabs = [
     { id: "shop", label: "ข้อมูลร้าน", icon: Store },
@@ -18,6 +124,17 @@ export default function SettingsPage() {
     { id: "limits", label: "จำกัดจำนวน", icon: Package },
     { id: "notifications", label: "แจ้งเตือน", icon: Bell },
   ];
+
+  const dayKeys = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+  const dayLabels = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -54,15 +171,15 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">ชื่อร้าน</label>
-                  <input type="text" defaultValue="ร้านชาบ้านสวน" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                  <input type="text" value={shopName} onChange={(e) => setShopName(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
                 </div>
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">เบอร์โทร</label>
-                  <input type="tel" defaultValue="02-123-4567" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                  <input type="tel" value={shopPhone} onChange={(e) => setShopPhone(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
                 </div>
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">ที่อยู่</label>
-                  <textarea defaultValue="123 ถ.สุขุมวิท แขวงคลองตัน เขตคลองเตย กรุงเทพฯ 10110" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none h-20" />
+                  <textarea value={shopAddress} onChange={(e) => setShopAddress(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none h-20" />
                 </div>
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">สถานะร้าน</label>
@@ -78,8 +195,8 @@ export default function SettingsPage() {
                     </span>
                   </div>
                 </div>
-                <button className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors">
-                  <Save className="w-4 h-4" /> บันทึก
+                <button onClick={saveShopInfo} disabled={saving} className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors disabled:opacity-50">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
                 </button>
               </div>
             </div>
@@ -90,20 +207,51 @@ export default function SettingsPage() {
             <div className="bg-white rounded-2xl p-6 shadow-soft">
               <h2 className="font-bold text-base mb-4">เวลาเปิด-ปิดร้าน</h2>
               <div className="space-y-3">
-                {["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"].map((day, i) => (
-                  <div key={day} className="flex items-center gap-4 p-3 rounded-xl border border-gray-100">
-                    <div className={cn("w-12 h-6 rounded-full transition-colors relative cursor-pointer", i < 6 ? "bg-primary" : "bg-gray-300")}>
-                      <div className={cn("w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform shadow", i < 6 ? "translate-x-6" : "translate-x-0.5")} />
+                {dayKeys.map((dayKey, i) => {
+                  const dayData = openingHours[dayKey] || { open: "08:00", close: "20:00", is_open: true };
+                  return (
+                    <div key={dayKey} className="flex items-center gap-4 p-3 rounded-xl border border-gray-100">
+                      <div
+                        onClick={() => {
+                          setOpeningHours((prev) => ({
+                            ...prev,
+                            [dayKey]: { ...dayData, is_open: !dayData.is_open },
+                          }));
+                        }}
+                        className={cn("w-12 h-6 rounded-full transition-colors relative cursor-pointer", dayData.is_open ? "bg-primary" : "bg-gray-300")}
+                      >
+                        <div className={cn("w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform shadow", dayData.is_open ? "translate-x-6" : "translate-x-0.5")} />
+                      </div>
+                      <span className="w-20 text-sm font-medium">{dayLabels[i]}</span>
+                      <input
+                        type="time"
+                        value={dayData.open}
+                        onChange={(e) => {
+                          setOpeningHours((prev) => ({
+                            ...prev,
+                            [dayKey]: { ...dayData, open: e.target.value },
+                          }));
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm"
+                      />
+                      <span className="text-muted text-sm">-</span>
+                      <input
+                        type="time"
+                        value={dayData.close}
+                        onChange={(e) => {
+                          setOpeningHours((prev) => ({
+                            ...prev,
+                            [dayKey]: { ...dayData, close: e.target.value },
+                          }));
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm"
+                      />
                     </div>
-                    <span className="w-20 text-sm font-medium">{day}</span>
-                    <input type="time" defaultValue={i < 6 ? "08:00" : ""} className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm" />
-                    <span className="text-muted text-sm">-</span>
-                    <input type="time" defaultValue={i < 6 ? "20:00" : ""} className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm" />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-              <button className="mt-4 flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors">
-                <Save className="w-4 h-4" /> บันทึก
+              <button onClick={saveHours} disabled={saving} className="mt-4 flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors disabled:opacity-50">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
               </button>
             </div>
           )}
@@ -113,26 +261,35 @@ export default function SettingsPage() {
             <div className="bg-white rounded-2xl p-6 shadow-soft">
               <h2 className="font-bold text-base mb-4">พื้นที่จัดส่ง & ค่าจัดส่ง</h2>
               <div className="space-y-3">
-                {[
-                  { zone: "โซน A (0-3 กม.)", fee: "ฟรี" },
-                  { zone: "โซน B (3-5 กม.)", fee: "฿20" },
-                  { zone: "โซน C (5-10 กม.)", fee: "฿40" },
-                ].map((z) => (
-                  <div key={z.zone} className="flex items-center justify-between p-4 rounded-xl border border-gray-100">
+                {deliveryZones.map((z, idx) => (
+                  <div key={z.id || idx} className="flex items-center justify-between p-4 rounded-xl border border-gray-100">
                     <div>
-                      <p className="text-sm font-medium">{z.zone}</p>
+                      <p className="text-sm font-medium">{z.name}</p>
                     </div>
-                    <span className={cn("text-sm font-bold", z.fee === "ฟรี" ? "text-green-600" : "text-foreground")}>{z.fee}</span>
+                    <span className={cn("text-sm font-bold", z.fee === 0 ? "text-green-600" : "text-foreground")}>
+                      {z.fee === 0 ? "ฟรี" : `฿${z.fee}`}
+                    </span>
                   </div>
                 ))}
+                {deliveryZones.length === 0 && (
+                  <p className="text-sm text-muted text-center py-4">ยังไม่มีโซนจัดส่ง</p>
+                )}
               </div>
               <div className="mt-4 p-4 rounded-xl bg-mint-50 border border-mint-200">
                 <p className="text-sm font-medium">ยอดสั่งซื้อขั้นต่ำ</p>
                 <div className="flex items-center gap-2 mt-2">
-                  <input type="number" defaultValue={100} className="w-32 px-4 py-2 rounded-xl border border-gray-200 text-sm" />
+                  <input
+                    type="number"
+                    value={minOrderAmount}
+                    onChange={(e) => setMinOrderAmount(Number(e.target.value))}
+                    className="w-32 px-4 py-2 rounded-xl border border-gray-200 text-sm"
+                  />
                   <span className="text-sm text-muted">บาท</span>
                 </div>
               </div>
+              <button onClick={saveDelivery} disabled={saving} className="mt-4 flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors disabled:opacity-50">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
+              </button>
             </div>
           )}
 
@@ -142,25 +299,31 @@ export default function SettingsPage() {
               <h2 className="font-bold text-base mb-4">วิธีการชำระเงิน</h2>
               <div className="space-y-3">
                 {[
-                  { label: "พร้อมเพย์ QR", desc: "รับชำระผ่าน PromptPay", enabled: true },
-                  { label: "โอนเงิน", desc: "รับโอนผ่านบัญชีธนาคาร", enabled: true },
-                  { label: "เงินสด", desc: "ชำระเงินปลายทาง", enabled: true },
+                  { key: "accept_promptpay" as const, label: "พร้อมเพย์ QR", desc: "รับชำระผ่าน PromptPay" },
+                  { key: "accept_transfer" as const, label: "โอนเงิน", desc: "รับโอนผ่านบัญชีธนาคาร" },
+                  { key: "accept_cash" as const, label: "เงินสด", desc: "ชำระเงินปลายทาง" },
                 ].map((pm) => (
-                  <div key={pm.label} className="flex items-center justify-between p-4 rounded-xl border border-gray-100">
+                  <div key={pm.key} className="flex items-center justify-between p-4 rounded-xl border border-gray-100">
                     <div>
                       <p className="text-sm font-medium">{pm.label}</p>
                       <p className="text-xs text-muted">{pm.desc}</p>
                     </div>
-                    <div className={cn("w-12 h-6 rounded-full transition-colors relative cursor-pointer", pm.enabled ? "bg-primary" : "bg-gray-300")}>
-                      <div className={cn("w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform shadow", pm.enabled ? "translate-x-6" : "translate-x-0.5")} />
+                    <div
+                      onClick={() => setSettings((prev) => ({ ...prev, [pm.key]: !prev[pm.key] }))}
+                      className={cn("w-12 h-6 rounded-full transition-colors relative cursor-pointer", settings[pm.key] ? "bg-primary" : "bg-gray-300")}
+                    >
+                      <div className={cn("w-5 h-5 bg-white rounded-full absolute top-0.5 transition-transform shadow", settings[pm.key] ? "translate-x-6" : "translate-x-0.5")} />
                     </div>
                   </div>
                 ))}
               </div>
               <div className="mt-4">
                 <label className="text-sm font-medium mb-1.5 block">PromptPay ID</label>
-                <input type="text" defaultValue="0812345678" className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                <input type="text" value={promptpayId} onChange={(e) => setPromptpayId(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
+              <button onClick={savePayment} disabled={saving} className="mt-4 flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors disabled:opacity-50">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
+              </button>
             </div>
           )}
 
@@ -181,26 +344,55 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-sm text-muted mb-1 block">สั่งล่วงหน้าอย่างน้อย (นาที)</label>
-                      <input type="number" defaultValue={60} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                      <input
+                        type="number"
+                        value={schedulingSettings.min_advance_minutes}
+                        onChange={(e) => setSchedulingSettings((prev) => ({ ...prev, min_advance_minutes: Number(e.target.value) }))}
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
                     </div>
                     <div>
                       <label className="text-sm text-muted mb-1 block">ล่วงหน้าได้สูงสุด (วัน)</label>
-                      <input type="number" defaultValue={3} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                      <input
+                        type="number"
+                        value={schedulingSettings.max_advance_days}
+                        onChange={(e) => setSchedulingSettings((prev) => ({ ...prev, max_advance_days: Number(e.target.value) }))}
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
                     </div>
                     <div>
                       <label className="text-sm text-muted mb-1 block">ช่วงเวลาทุกๆ (นาที)</label>
-                      <input type="number" defaultValue={30} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                      <input
+                        type="number"
+                        value={schedulingSettings.slot_interval_minutes}
+                        onChange={(e) => setSchedulingSettings((prev) => ({ ...prev, slot_interval_minutes: Number(e.target.value) }))}
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
                     </div>
                     <div>
                       <label className="text-sm text-muted mb-1 block">จำกัด order/ช่วงเวลา</label>
-                      <input type="number" defaultValue={10} className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                      <input
+                        type="number"
+                        value={schedulingSettings.max_orders_per_slot}
+                        onChange={(e) => setSchedulingSettings((prev) => ({ ...prev, max_orders_per_slot: Number(e.target.value) }))}
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
                     </div>
                   </div>
                   <div>
                     <label className="text-sm font-medium mb-2 block">วันที่ปิดรับจอง</label>
                     <div className="flex flex-wrap gap-2">
-                      {["2026-03-01", "2026-03-05"].map((date) => (
-                        <span key={date} className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium">
+                      {(schedulingSettings.blocked_dates || []).map((date) => (
+                        <span
+                          key={date}
+                          className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium cursor-pointer"
+                          onClick={() =>
+                            setSchedulingSettings((prev) => ({
+                              ...prev,
+                              blocked_dates: prev.blocked_dates.filter((d) => d !== date),
+                            }))
+                          }
+                        >
                           {date} ✕
                         </span>
                       ))}
@@ -212,15 +404,27 @@ export default function SettingsPage() {
                   <div>
                     <label className="text-sm font-medium mb-2 block">วันที่ปิดรับจองประจำ</label>
                     <div className="flex flex-wrap gap-2">
-                      {["อาทิตย์"].map((day) => (
-                        <span key={day} className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium">
-                          {day} ✕
-                        </span>
-                      ))}
+                      {(schedulingSettings.blocked_weekdays || []).map((wd) => {
+                        const wdLabels = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+                        return (
+                          <span
+                            key={wd}
+                            className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium cursor-pointer"
+                            onClick={() =>
+                              setSchedulingSettings((prev) => ({
+                                ...prev,
+                                blocked_weekdays: prev.blocked_weekdays.filter((d) => d !== wd),
+                              }))
+                            }
+                          >
+                            {wdLabels[wd]} ✕
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
-                  <button className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors">
-                    <Save className="w-4 h-4" /> บันทึก
+                  <button onClick={saveScheduling} disabled={saving} className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors disabled:opacity-50">
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
                   </button>
                 </div>
               )}
@@ -237,38 +441,26 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs text-muted mb-1 block">สินค้ารวมต่อ 1 order (ชิ้น)</label>
-                      <input type="number" defaultValue={20} className="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                      <input
+                        type="number"
+                        value={orderLimits.max_items_per_order}
+                        onChange={(e) => setOrderLimits((prev) => ({ ...prev, max_items_per_order: Number(e.target.value) }))}
+                        className="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
                     </div>
                     <div>
                       <label className="text-xs text-muted mb-1 block">รับ order สูงสุดต่อวัน</label>
-                      <input type="number" defaultValue={200} className="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                      <input
+                        type="number"
+                        value={orderLimits.max_orders_per_day}
+                        onChange={(e) => setOrderLimits((prev) => ({ ...prev, max_orders_per_day: Number(e.target.value) }))}
+                        className="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
                     </div>
                   </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-semibold mb-3">ระดับสินค้า (ตั้งค่าแต่ละเมนู)</h3>
-                  <div className="space-y-2">
-                    {[
-                      { name: "ชาเขียวมัทฉะ", daily: 50, perOrder: 5 },
-                      { name: "ชานมไข่มุก", daily: 100, perOrder: 10 },
-                      { name: "เค้กส้ม", daily: 20, perOrder: 3 },
-                    ].map((product) => (
-                      <div key={product.name} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100">
-                        <span className="text-sm font-medium flex-1">{product.name}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted">ต่อวัน:</span>
-                          <input type="number" defaultValue={product.daily} className="w-16 px-2 py-1 rounded-lg border text-sm text-center" />
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted">ต่อออเดอร์:</span>
-                          <input type="number" defaultValue={product.perOrder} className="w-16 px-2 py-1 rounded-lg border text-sm text-center" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <button className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors">
-                  <Save className="w-4 h-4" /> บันทึก
+                <button onClick={saveLimits} disabled={saving} className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark transition-colors disabled:opacity-50">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} บันทึก
                 </button>
               </div>
             </div>

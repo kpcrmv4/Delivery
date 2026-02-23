@@ -1,88 +1,90 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Minus, Plus, Heart, ShoppingBag } from "lucide-react";
 import { useCartStore } from "@/stores/cart-store";
+import { createClient } from "@/lib/supabase/client";
+import { getProductById } from "@/lib/supabase/queries";
 import { formatPrice, cn } from "@/lib/utils";
 import type { Product, SelectedOption, ProductOption } from "@/types";
 
-const mockProduct: Product = {
-  id: "1",
-  shop_id: "shop-1",
-  category_id: "cat-3",
-  name: "ชานมไข่มุก",
-  description: "ชานมสูตรพิเศษ เข้มข้น หอมกลิ่นชา เสิร์ฟพร้อมไข่มุกนุ่มๆ เคี้ยวหนึบ อร่อยทุกคำ",
-  price: 55,
-  image_url: "🧋",
-  sort_order: 1,
-  status: "available",
-  is_recommended: true,
-  is_favorite: false,
-  daily_limit: 100,
-  daily_sold: 72,
-  max_per_order: 10,
-  options: [
-    {
-      id: "opt-size",
-      name: "ขนาด",
-      type: "single_select",
-      is_required: true,
-      sort_order: 1,
-      choices: [
-        { id: "size-s", name: "แก้วเล็ก (S)", price_adjustment: 0, is_available: true },
-        { id: "size-m", name: "แก้วกลาง (M)", price_adjustment: 10, is_available: true },
-        { id: "size-l", name: "แก้วใหญ่ (L)", price_adjustment: 20, is_available: true },
-      ],
-    },
-    {
-      id: "opt-sweet",
-      name: "ระดับความหวาน",
-      type: "single_select",
-      is_required: true,
-      sort_order: 2,
-      choices: [
-        { id: "sweet-100", name: "หวานปกติ (100%)", price_adjustment: 0, is_available: true },
-        { id: "sweet-75", name: "หวานน้อย (75%)", price_adjustment: 0, is_available: true },
-        { id: "sweet-50", name: "หวาน 50%", price_adjustment: 0, is_available: true },
-        { id: "sweet-25", name: "หวาน 25%", price_adjustment: 0, is_available: true },
-        { id: "sweet-0", name: "ไม่หวาน (0%)", price_adjustment: 0, is_available: true },
-      ],
-    },
-    {
-      id: "opt-topping",
-      name: "ท็อปปิ้งเพิ่ม",
-      type: "multi_select",
-      is_required: false,
-      sort_order: 3,
-      choices: [
-        { id: "top-pearl", name: "ไข่มุก", price_adjustment: 10, is_available: true },
-        { id: "top-jelly", name: "เจลลี่", price_adjustment: 10, is_available: true },
-        { id: "top-pudding", name: "พุดดิ้ง", price_adjustment: 15, is_available: true },
-        { id: "top-cream", name: "วิปครีม", price_adjustment: 15, is_available: true },
-        { id: "top-shot", name: "เอสเพรสโซ่ช็อต", price_adjustment: 20, is_available: false },
-      ],
-    },
-  ],
-};
-
 export default function ProductDetailPage() {
   const router = useRouter();
+  const params = useParams();
+  const productId = params.id as string;
+
   const addItem = useCartStore((s) => s.addItem);
+  const [product, setProduct] = useState<Product | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [note, setNote] = useState("");
   const [isFavorite, setIsFavorite] = useState(false);
-  const [selectedOptions, setSelectedOptions] = useState<Record<string, string[]>>(() => {
-    const initial: Record<string, string[]> = {};
-    mockProduct.options.forEach((opt) => {
-      if (opt.is_required && opt.choices.length > 0) {
-        initial[opt.id] = [opt.choices[0].id];
-      }
-    });
-    return initial;
-  });
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string[]>>({});
 
-  const product = mockProduct;
+  useEffect(() => {
+    const supabase = createClient();
+
+    async function loadProduct() {
+      setIsLoading(true);
+      const { data, error: fetchError } = await getProductById(supabase, productId);
+
+      if (fetchError || !data) {
+        setError("ไม่พบสินค้า");
+        setIsLoading(false);
+        return;
+      }
+
+      setProduct(data);
+
+      // Initialize required options with first choice
+      const initial: Record<string, string[]> = {};
+      data.options.forEach((opt) => {
+        if (opt.is_required && opt.choices.length > 0) {
+          initial[opt.id] = [opt.choices[0].id];
+        }
+      });
+      setSelectedOptions(initial);
+      setIsLoading(false);
+    }
+
+    loadProduct();
+  }, [productId]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-white max-w-lg mx-auto">
+        <div className="h-64 bg-gray-200 animate-pulse" />
+        <div className="px-4 mt-6 space-y-4">
+          <div className="w-2/3 h-6 bg-gray-200 animate-pulse rounded" />
+          <div className="w-full h-4 bg-gray-200 animate-pulse rounded" />
+          <div className="w-1/3 h-6 bg-gray-200 animate-pulse rounded" />
+          <div className="space-y-3 mt-6">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="w-full h-10 bg-gray-200 animate-pulse rounded-xl" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !product) {
+    return (
+      <div className="min-h-screen bg-white max-w-lg mx-auto flex flex-col items-center justify-center p-8">
+        <span className="text-5xl mb-4">😕</span>
+        <h2 className="text-lg font-semibold">{error || "ไม่พบสินค้า"}</h2>
+        <button
+          onClick={() => router.back()}
+          className="mt-4 px-6 py-2 bg-primary text-white rounded-xl font-semibold"
+        >
+          กลับ
+        </button>
+      </div>
+    );
+  }
+
   const remaining = product.daily_limit ? product.daily_limit - product.daily_sold : null;
   const maxQty = Math.min(
     product.max_per_order || 99,

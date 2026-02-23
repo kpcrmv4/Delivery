@@ -50,13 +50,16 @@ export default function CustomerHomePage() {
       if (catResult.data) setCategories(catResult.data);
       if (prodResult.data) setProducts(prodResult.data);
       if (bannerResult.data) {
-        const mapped = bannerResult.data.map((b, i) => ({
-          id: b.id,
-          image_url: (b as Record<string, unknown>).image_url as string || "",
-          title: ((b as Record<string, unknown>).title as string) || "โปรโมชั่นพิเศษ",
-          subtitle: ((b as Record<string, unknown>).subtitle as string) || "",
-          color: FALLBACK_GRADIENT_COLORS[i % FALLBACK_GRADIENT_COLORS.length],
-        }));
+        const mapped = bannerResult.data.map((b, i) => {
+          const raw = b as unknown as Record<string, unknown>;
+          return {
+            id: b.id,
+            image_url: (raw.image_url as string) || "",
+            title: (raw.title as string) || "โปรโมชั่นพิเศษ",
+            subtitle: (raw.subtitle as string) || "",
+            color: FALLBACK_GRADIENT_COLORS[i % FALLBACK_GRADIENT_COLORS.length],
+          };
+        });
         setBanners(mapped);
       }
       setIsLoading(false);

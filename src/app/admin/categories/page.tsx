@@ -1,68 +1,26 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Edit, Trash2, GripVertical, FolderOpen, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Edit, Trash2, GripVertical, FolderOpen, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import {
+  getCategoriesWithCount,
+  getShopId,
+  upsertCategory,
+  deleteCategory as deleteCategoryQuery,
+} from "@/lib/supabase/queries";
 
-interface Category {
+interface CategoryWithCount {
   id: string;
+  shop_id: string;
   name: string;
-  emoji: string;
-  productCount: number;
-  sortOrder: number;
-  isActive: boolean;
+  icon: string;
+  image_url: string;
+  sort_order: number;
+  is_active: boolean;
+  product_count: number;
 }
-
-const mockCategories: Category[] = [
-  {
-    id: "1",
-    name: "เครื่องดื่มเย็น",
-    emoji: "🧊",
-    productCount: 12,
-    sortOrder: 1,
-    isActive: true,
-  },
-  {
-    id: "2",
-    name: "เครื่องดื่มร้อน",
-    emoji: "☕",
-    productCount: 8,
-    sortOrder: 2,
-    isActive: true,
-  },
-  {
-    id: "3",
-    name: "ชานม",
-    emoji: "🧋",
-    productCount: 15,
-    sortOrder: 3,
-    isActive: true,
-  },
-  {
-    id: "4",
-    name: "กาแฟ",
-    emoji: "☕",
-    productCount: 10,
-    sortOrder: 4,
-    isActive: true,
-  },
-  {
-    id: "5",
-    name: "ของหวาน",
-    emoji: "🍰",
-    productCount: 6,
-    sortOrder: 5,
-    isActive: false,
-  },
-  {
-    id: "6",
-    name: "เบเกอรี่",
-    emoji: "🥐",
-    productCount: 4,
-    sortOrder: 6,
-    isActive: true,
-  },
-];
 
 const emojiOptions = [
   "🧊", "☕", "🧋", "🍵", "🥤", "🍰", "🥐", "🍩",
@@ -85,25 +43,40 @@ const emptyForm: FormState = {
 };
 
 export default function AdminCategoriesPage() {
-  const [categories, setCategories] = useState<Category[]>(mockCategories);
+  const [categories, setCategories] = useState<CategoryWithCount[]>([]);
   const [form, setForm] = useState<FormState | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const shopId = getShopId();
+
+  const fetchCategories = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await getCategoriesWithCount(supabase, shopId);
+    if (data) setCategories(data as CategoryWithCount[]);
+    setLoading(false);
+  }, [shopId]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   function openAddForm() {
     const maxSort = categories.reduce(
-      (max, c) => Math.max(max, c.sortOrder),
+      (max, c) => Math.max(max, c.sort_order),
       0
     );
     setForm({ ...emptyForm, sortOrder: maxSort + 1 });
     setShowEmojiPicker(false);
   }
 
-  function openEditForm(category: Category) {
+  function openEditForm(category: CategoryWithCount) {
     setForm({
       id: category.id,
       name: category.name,
-      emoji: category.emoji,
-      sortOrder: category.sortOrder,
+      emoji: category.icon,
+      sortOrder: category.sort_order,
     });
     setShowEmojiPicker(false);
   }
@@ -113,54 +86,66 @@ export default function AdminCategoriesPage() {
     setShowEmojiPicker(false);
   }
 
-  function saveForm() {
+  async function saveForm() {
     if (!form || !form.name.trim()) return;
+    setSaving(true);
 
-    if (form.id) {
-      // Edit existing
+    const supabase = createClient();
+    const payload: Record<string, unknown> = {
+      shop_id: shopId,
+      name: form.name.trim(),
+      icon: form.emoji,
+      sort_order: form.sortOrder,
+    };
+    if (form.id) payload.id = form.id;
+
+    const { error } = await upsertCategory(supabase, payload as Parameters<typeof upsertCategory>[1]);
+    if (!error) {
+      await fetchCategories();
+      closeForm();
+    }
+    setSaving(false);
+  }
+
+  async function toggleActive(id: string) {
+    const category = categories.find((c) => c.id === id);
+    if (!category) return;
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("categories")
+      .update({ is_active: !category.is_active })
+      .eq("id", id);
+
+    if (!error) {
       setCategories((prev) =>
         prev.map((c) =>
-          c.id === form.id
-            ? {
-                ...c,
-                name: form.name.trim(),
-                emoji: form.emoji,
-                sortOrder: form.sortOrder,
-              }
-            : c
+          c.id === id ? { ...c, is_active: !c.is_active } : c
         )
       );
-    } else {
-      // Add new
-      const newCategory: Category = {
-        id: String(Date.now()),
-        name: form.name.trim(),
-        emoji: form.emoji,
-        productCount: 0,
-        sortOrder: form.sortOrder,
-        isActive: true,
-      };
-      setCategories((prev) => [...prev, newCategory]);
     }
-    closeForm();
   }
 
-  function toggleActive(id: string) {
-    setCategories((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, isActive: !c.isActive } : c
-      )
-    );
-  }
-
-  function deleteCategory(id: string) {
-    setCategories((prev) => prev.filter((c) => c.id !== id));
-    if (form?.id === id) closeForm();
+  async function handleDeleteCategory(id: string) {
+    const supabase = createClient();
+    const { error } = await deleteCategoryQuery(supabase, id);
+    if (!error) {
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+      if (form?.id === id) closeForm();
+    }
   }
 
   const sortedCategories = [...categories].sort(
-    (a, b) => a.sortOrder - b.sortOrder
+    (a, b) => a.sort_order - b.sort_order
   );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -202,7 +187,7 @@ export default function AdminCategoriesPage() {
                 key={category.id}
                 className={cn(
                   "bg-white rounded-2xl border border-gray-100 p-4 shadow-soft hover:shadow-card transition-all group",
-                  !category.isActive && "opacity-60"
+                  !category.is_active && "opacity-60"
                 )}
               >
                 <div className="flex items-center gap-4">
@@ -216,7 +201,7 @@ export default function AdminCategoriesPage() {
 
                   {/* Emoji icon */}
                   <div className="w-12 h-12 bg-mint-100 rounded-xl flex items-center justify-center text-2xl flex-shrink-0">
-                    {category.emoji}
+                    {category.icon}
                   </div>
 
                   {/* Info */}
@@ -225,8 +210,8 @@ export default function AdminCategoriesPage() {
                       {category.name}
                     </h3>
                     <p className="text-xs text-muted mt-0.5">
-                      {category.productCount} สินค้า &middot; ลำดับที่{" "}
-                      {category.sortOrder}
+                      {category.product_count} สินค้า &middot; ลำดับที่{" "}
+                      {category.sort_order}
                     </p>
                   </div>
 
@@ -235,19 +220,19 @@ export default function AdminCategoriesPage() {
                     onClick={() => toggleActive(category.id)}
                     className="relative flex-shrink-0"
                     aria-label={
-                      category.isActive ? "ปิดใช้งาน" : "เปิดใช้งาน"
+                      category.is_active ? "ปิดใช้งาน" : "เปิดใช้งาน"
                     }
                   >
                     <div
                       className={cn(
                         "w-10 h-6 rounded-full transition-colors",
-                        category.isActive ? "bg-primary" : "bg-gray-300"
+                        category.is_active ? "bg-primary" : "bg-gray-300"
                       )}
                     >
                       <div
                         className={cn(
                           "absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform",
-                          category.isActive
+                          category.is_active
                             ? "translate-x-[18px]"
                             : "translate-x-0.5"
                         )}
@@ -265,7 +250,7 @@ export default function AdminCategoriesPage() {
                       <Edit className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => deleteCategory(category.id)}
+                      onClick={() => handleDeleteCategory(category.id)}
                       className="p-2 text-muted hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                       aria-label="ลบ"
                     >
@@ -377,15 +362,21 @@ export default function AdminCategoriesPage() {
               <div className="flex items-center gap-3 pt-2">
                 <button
                   onClick={saveForm}
-                  disabled={!form.name.trim()}
+                  disabled={!form.name.trim() || saving}
                   className={cn(
                     "flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors",
-                    form.name.trim()
+                    form.name.trim() && !saving
                       ? "bg-primary hover:bg-primary-dark text-white shadow-soft"
                       : "bg-gray-100 text-gray-400 cursor-not-allowed"
                   )}
                 >
-                  {form.id ? "บันทึกการแก้ไข" : "เพิ่มหมวดหมู่"}
+                  {saving ? (
+                    <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                  ) : form.id ? (
+                    "บันทึกการแก้ไข"
+                  ) : (
+                    "เพิ่มหมวดหมู่"
+                  )}
                 </button>
                 <button
                   onClick={closeForm}
