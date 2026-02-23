@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { TrendingUp, TrendingDown, DollarSign, ShoppingBag, Users, Package, Loader2 } from "lucide-react";
+import { DollarSign, ShoppingBag, Users, Package, Loader2 } from "lucide-react";
 import { cn, formatPrice } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getShopId } from "@/lib/supabase/queries";
@@ -83,9 +83,9 @@ export default function ReportsPage() {
       .gte("created_at", start)
       .lte("created_at", end);
 
-    const orderList = orders || [];
-    const revenue = orderList.reduce((sum, o) => sum + Number(o.total || 0), 0);
-    const uniqueCustomers = new Set(orderList.map((o) => o.customer_id)).size;
+    const orderList = (orders || []) as { id: string; total: number; payment_method: string; customer_id: string; created_at: string }[];
+    const revenue = orderList.reduce((sum: number, o) => sum + Number(o.total || 0), 0);
+    const uniqueCustomers = new Set(orderList.map((o: { customer_id: string }) => o.customer_id)).size;
 
     setTotalRevenue(revenue);
     setTotalOrders(orderList.length);
@@ -93,7 +93,7 @@ export default function ReportsPage() {
     setAvgPerOrder(orderList.length > 0 ? Math.round(revenue / orderList.length) : 0);
 
     // Fetch top products from order_items
-    const orderIds = orderList.map((o) => o.id);
+    const orderIds = orderList.map((o: { id: string }) => o.id);
     if (orderIds.length > 0) {
       const { data: items } = await supabase
         .from("order_items")
@@ -102,7 +102,7 @@ export default function ReportsPage() {
 
       if (items) {
         const productMap: Record<string, { name: string; sold: number; revenue: number; image: string }> = {};
-        items.forEach((item) => {
+        (items as { product_name: string; product_image: string; quantity: number; total_price: number }[]).forEach((item) => {
           const key = item.product_name;
           if (!productMap[key]) {
             productMap[key] = { name: key, sold: 0, revenue: 0, image: item.product_image || "" };
@@ -125,7 +125,7 @@ export default function ReportsPage() {
     // Build daily data
     const dayMap: Record<string, { revenue: number; orders: number }> = {};
     const dayNames = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
-    orderList.forEach((o) => {
+    orderList.forEach((o: { total: number; created_at: string }) => {
       const d = new Date(o.created_at);
       const key = d.toISOString().split("T")[0];
       if (!dayMap[key]) dayMap[key] = { revenue: 0, orders: 0 };
@@ -149,7 +149,7 @@ export default function ReportsPage() {
 
     // Payment summary
     const pmMap: Record<string, number> = {};
-    orderList.forEach((o) => {
+    orderList.forEach((o: { payment_method: string; total: number }) => {
       const method = o.payment_method || "other";
       pmMap[method] = (pmMap[method] || 0) + Number(o.total || 0);
     });

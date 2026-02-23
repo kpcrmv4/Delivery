@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { MapPin, Clock, Navigation, Phone } from "lucide-react";
+import { MapPin, Clock, Phone } from "lucide-react";
 import Link from "next/link";
 import { cn, formatPrice } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";

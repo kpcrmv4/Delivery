@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Phone, MapPin, Clock, Star, Edit, Trash2, Search, Loader2 } from "lucide-react";
+import { Plus, Phone, Clock, Edit, Trash2, Search, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getDrivers, getShopId } from "@/lib/supabase/queries";

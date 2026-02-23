@@ -8,7 +8,7 @@ import { useCartStore } from "@/stores/cart-store";
 import { createClient } from "@/lib/supabase/client";
 import { getCategories, getProducts } from "@/lib/supabase/queries";
 import { cn } from "@/lib/utils";
-import type { Product, Category } from "@/types";
+import type { Product } from "@/types";
 
 export default function MenuPage() {
   const router = useRouter();

@@ -1,4 +1,4 @@
-import { createServerClient, type CookieMethods } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
@@ -28,7 +28,7 @@ export async function middleware(request: NextRequest) {
           })
           response.cookies.set({ name, value: '', ...options } as never)
         },
-      } as CookieMethods,
+      },
     }
   )
 

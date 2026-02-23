@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
   Shop, Category, Product, ProductOption, Banner,
-  Order, OrderItem, Promotion, PromotionCode, CustomerAddress,
+  Order, Promotion, PromotionCode, CustomerAddress,
   Profile, Driver,
 } from '@/types'
 
@@ -188,6 +188,7 @@ export async function upsertProduct(
   supabase: SupabaseClient,
   product: Record<string, unknown>
 ) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { options, category, daily_sold, ...productData } = product
   if (product.id) {
     const { data, error } = await supabase
@@ -451,6 +452,7 @@ export async function upsertPromotion(
   supabase: SupabaseClient,
   promotion: Record<string, unknown>
 ) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { codes, usages, usage_count, ...promoData } = promotion
   if (promotion.id) {
     const { data, error } = await supabase

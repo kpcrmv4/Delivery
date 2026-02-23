@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Package, MapPin, Clock, Navigation, TrendingUp } from "lucide-react";
+import { Package, MapPin, Clock, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { cn, formatPrice } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -44,19 +44,12 @@ export default function DriverDashboard() {
 
   // Count delivered today
   const todayStr = new Date().toISOString().split("T")[0];
-  const deliveredToday = useMemo(() => {
-    // We'll fetch delivered orders count separately
-    return 0;
-  }, []);
-
   const [stats, setStats] = useState({ deliveredToday: 0, totalEarnings: 0 });
 
   useEffect(() => {
     if (!user?.id) return;
 
     async function loadStats() {
-      const todayStart = `${todayStr}T00:00:00`;
-      const todayEnd = `${todayStr}T23:59:59`;
 
       const { data } = await getOrders(supabase, {
         driverId: user!.id,

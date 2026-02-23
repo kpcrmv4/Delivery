@@ -40,14 +40,15 @@ export async function POST(request: Request) {
   // Update daily product sales
   const today = new Date().toISOString().split('T')[0]
   for (const item of body.items) {
-    await supabase.rpc('increment_daily_sales', {
+    const { error: rpcError } = await supabase.rpc('increment_daily_sales', {
       p_shop_id: orderData.shop_id,
       p_product_id: item.product_id,
       p_sale_date: today,
       p_quantity: item.quantity,
-    }).catch(() => {
+    })
+    if (rpcError) {
       // Fallback: upsert manually
-      supabase
+      await supabase
         .from('daily_product_sales')
         .upsert(
           {
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
           },
           { onConflict: 'shop_id,product_id,sale_date' }
         )
-    })
+    }
   }
 
   return NextResponse.json({ data })

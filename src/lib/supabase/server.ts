@@ -1,4 +1,4 @@
-import { createServerClient, type CookieMethods } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export function createServerSupabaseClient() {
@@ -26,13 +26,13 @@ export function createServerSupabaseClient() {
             // Server component can't set cookies
           }
         },
-      } as CookieMethods,
+      },
     }
   )
 }
 
-export function createServiceRoleClient() {
-  const { createClient } = require('@supabase/supabase-js')
+export async function createServiceRoleClient() {
+  const { createClient } = await import('@supabase/supabase-js')
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!

@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ valid: false, error: result.error }, { status: 400 })
   }
 
-  const promotion = result.promotion as Record<string, unknown>
+  const promotion = result.promotion as unknown as Record<string, unknown>
   const actions = (promotion?.actions || {}) as Record<string, unknown>
 
   // Calculate discount based on promotion type

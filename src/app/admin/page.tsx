@@ -6,7 +6,6 @@ import {
   ShoppingBag,
   TrendingUp,
   Clock,
-  ArrowUpRight,
   Package,
   BarChart3,
   Loader2,

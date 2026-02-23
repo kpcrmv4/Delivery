@@ -11,6 +11,7 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("shop");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [shop, setShop] = useState<Shop | null>(null);
 
   // Editable shop fields
